@@ -458,6 +458,7 @@ zen-library-easels-section .easel-card-body {
   padding: 8px 8px 7px;
   border-radius: calc(var(--easel-card-radius) - 4px);
   background: light-dark(#e8e8e8, #2a2a2a);
+  color: light-dark(#111111, #ffffff);
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -500,7 +501,8 @@ zen-library-easels-section .easel-card-mark {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  color: var(--zen-folder-stroke, var(--zen-primary-color, currentColor));
+  /* Space accent, pushed toward white (dark) or black (light) so it stays readable. */
+  color: color-mix(in srgb, var(--zen-primary-color, #8b9ac0) 62%, light-dark(#000000, #ffffff));
 }
 
 zen-library-easels-section .easel-card-squiggle {
@@ -545,6 +547,10 @@ zen-library-easels-section .easel-card-new::before {
 
 zen-library-easels-section .easel-card-new:hover {
   border-color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+zen-library-easels-section .easel-card-new[data-merged]:hover::before {
+  content: "New Easel/Note";
 }
 
 zen-library-easels-section .easel-card-new:hover::before {

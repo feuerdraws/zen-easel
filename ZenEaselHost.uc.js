@@ -1126,6 +1126,15 @@
             await EaselStore.renameClosed(id, trimmed);
         }
 
+        // Library "Duplicate Easel": the copy is made by the background store, so it
+        // works whether or not the source is open.
+        async duplicateBoard(id) {
+            if (!id) return null;
+            const { EaselStore } =
+                ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            return EaselStore.duplicateEasel(id);
+        }
+
         // Deletes the board, then closes every tab still showing it. The pages
         // drop their documents first: pagehide saves whatever is still in
         // memory, which would put the file back a moment after it was removed.

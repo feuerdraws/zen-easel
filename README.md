@@ -106,3 +106,10 @@ Feature design is Arc's, by The Browser Company. This is an independent reimplem
 The renderer's structure is modelled on [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT). The variable-width stroke geometry is an independent implementation of the approach described by [perfect-freehand](https://github.com/steveruizok/perfect-freehand) (Steve Ruiz, MIT).
 
 No code from either project was copied.
+
+
+## Library: merged tab, card theming, Duplicate
+
+- Cards follow the browser theme (dark card/white text in dark mode, light card/black text in light mode); the squiggle icon takes the Space accent, shifted toward white or black for readability.
+- With Zen Notes installed, the Library shows one **Easels & Notes** tab beneath Downloads; the **+** card asks whether to create an easel or a note. Alone, this stays an **Easels** tab.
+- The context menu is **Open Easel / Rename Easel… / Duplicate Easel / Delete Easel**. Duplicate copies the board, its assets and thumbnail under a new id.

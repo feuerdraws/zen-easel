@@ -356,6 +356,36 @@ class EaselStoreImpl {
         return { entry, json: JSON.stringify(body) };
     }
 
+    // Copies an easel (document, assets, thumbnail) under a new id and returns its
+    // index entry. The source is flushed first so queued edits are included.
+    async duplicateEasel(id) {
+        await this.init();
+        const raw = await this.readDocument(id);
+        if (raw == null) return null;
+        let doc;
+        try { doc = JSON.parse(raw); } catch (e) { return null; }
+        const now = Date.now();
+        const newId = uuid();
+        const base = typeof doc.title === "string" && doc.title ? doc.title : "Untitled Easel";
+        const title = `${base} copy`;
+        doc.id = newId; doc.title = title; doc.createdAt = now; doc.updatedAt = now;
+        const path = this._easelPath(newId);
+        await IOUtils.writeJSON(path, doc, { tmpPath: `${path}.tmp` });
+        try {
+            const from = this._assetDir(id);
+            if (await IOUtils.exists(from)) await IOUtils.copy(from, this._assetDir(newId), { recursive: true });
+        } catch (e) { console.error("[zen-easel] could not copy assets while duplicating:", e); }
+        try {
+            const thumb = this._thumbPath(id);
+            if (await IOUtils.exists(thumb)) await IOUtils.copy(thumb, this._thumbPath(newId));
+        } catch (e) { }
+        const source = this._index.easels.find(e => e.id === id);
+        const entry = { id: newId, title, createdAt: now, updatedAt: now, lastOpenedAt: 0, objectCount: source?.objectCount ?? 0 };
+        this._index.easels.push(entry);
+        await this._writeIndex();
+        return entry;
+    }
+
     async renameEasel(id, title) {
         await this.init();
         if (!isSafeId(id)) return;

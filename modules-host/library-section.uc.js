@@ -21,6 +21,22 @@
     const SEARCH_MODULE = "moz-src:///zen/library/sections/ZenLibrarySearchSection.mjs";
     const LIT_MODULE = "chrome://global/content/vendor/lit.all.mjs";
 
+    // Tiny cross-mod registry (same snippet lives in Zen Notes). Whichever mod loads
+    // first creates it. When a "notes" provider is present, this section becomes the
+    // merged "Easels & Notes" tab; when it is absent, this stays a plain Easels tab.
+    const hub = (window.ZenLibraryHub ||= (() => {
+        const providers = new Map(), subs = new Set();
+        const emit = type => { for (const fn of [...subs]) try { fn(type); } catch (e) { console.error(e); } };
+        return {
+            providers,
+            subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },
+            register(provider) { providers.set(provider.id, provider); emit("providers"); },
+            unregister(id, provider) { if (!provider || providers.get(id) === provider) { providers.delete(id); emit("providers"); } },
+            changed() { emit("items"); }
+        };
+    })());
+    const merged = () => hub.providers.has("notes");
+
     const inBackground = event =>
         !!event && (event.button === 1 || event.getModifierState("Accel"));
 
@@ -44,6 +60,9 @@
             this._cancelled = false;
             // Read now: the library's constructor rewrites last-tab to "history" before this section exists.
             this._lastTab = lastTabPref();
+            this._provider = { id: "easels", label: "Easels", newLabel: "Easel" };
+            this._hubUnsub = hub.subscribe(type => this._onHub(type));
+            hub.register(this._provider);
             const run = () => {
                 if (this._cancelled || window.ZenEaselLibrarySection !== this) return;
                 try { this._start(); }
@@ -69,6 +88,8 @@
 
         destroy() {
             this._cancelled = true;
+            this._hubUnsub?.(); this._hubUnsub = null;
+            hub.unregister("easels", this._provider); this._provider = null;
             if (this._preload) {
                 window.cancelIdleCallback(this._preload);
                 this._preload = null;
@@ -77,6 +98,18 @@
             this._observers.clear();
             for (const section of document.querySelectorAll("zen-library-easels-section")) {
                 this.disconnect(section);
+            }
+        },
+
+        _onHub(type) {
+            if (this._cancelled) return;
+            if (type === "providers") {
+                const lib = customElements.get("zen-library")?.getInstance?.(false);
+                if (lib) this._fixLabel(lib);
+            }
+            for (const section of document.querySelectorAll("zen-library-easels-section")) {
+                if (type === "providers") this.fixSection(section);
+                if (section.isConnected) section.requestUpdate();
             }
         },
 
@@ -174,11 +207,13 @@
             if (!Section) return;
 
             if (!lib.zenLibrarySections[SECTION_ID]) {
+                // Right beneath Downloads (Arc's spot); after Media if there is no Downloads.
+                const anchor = lib.zenLibrarySections.downloads ? "downloads" : "media";
                 const sections = {};
                 let placed = false;
                 for (const [id, Known] of Object.entries(lib.zenLibrarySections)) {
                     sections[id] = Known;
-                    if (id === "media") {
+                    if (id === anchor) {
                         sections[SECTION_ID] = Section;
                         placed = true;
                     }
@@ -231,7 +266,8 @@
             const label = lib.querySelector(`.zen-library-tab[data-section="${SECTION_ID}"] label`);
             if (!label) return;
             if (label.hasAttribute("data-l10n-id")) label.removeAttribute("data-l10n-id");
-            if (label.textContent !== "Easels") label.textContent = "Easels";
+            const text = merged() ? "Easels & Notes" : "Easels";
+            if (label.textContent !== text) label.textContent = text;
         },
 
         connect(section) {
@@ -275,8 +311,9 @@
             const input = section.querySelector(".zen-library-search-box input");
             if (!input) return;
             if (input.hasAttribute("data-l10n-id")) input.removeAttribute("data-l10n-id");
-            if (input.getAttribute("placeholder") !== "Search easels") {
-                input.setAttribute("placeholder", "Search easels");
+            const text = merged() ? "Search Easels & Notes…" : "Search easels";
+            if (input.getAttribute("placeholder") !== text) {
+                input.setAttribute("placeholder", text);
             }
         },
 
@@ -309,31 +346,50 @@
         renderItems(section) {
             const { html, repeat } = this._lit;
             const query = (section.searchQuery || "").trim().toLowerCase();
+            const notes = hub.providers.get("notes");
             const boards = section._boards;
             const shown = Array.isArray(boards)
                 ? boards.filter(board => !query || (board.title || "").toLowerCase().includes(query))
                 : null;
+
+            const entries = [];
+            for (const board of shown || []) {
+                entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: this._card(html, board) });
+            }
+            if (notes) {
+                try {
+                    for (const item of notes.items(query)) {
+                        entries.push({ key: item.key, updatedAt: item.updatedAt || 0, tpl: html`${item.node}` });
+                    }
+                } catch (e) { console.error("[zen-easel] could not list notes:", e); }
+            }
+            entries.sort((a, b) => b.updatedAt - a.updatedAt);
+
+            const noun = notes ? "easels or notes" : "easels";
             const empty = shown == null
                 ? html`<div class="zen-library-empty">Loading…</div>`
-                : shown.length
+                : entries.length
                     ? null
                     : html`
                         <div class="zen-library-empty easel-card-empty">
-                            <div>${query ? "No easels match" : "No easels yet"}</div>
+                            <div>${query ? `No ${noun} match` : `No ${noun} yet`}</div>
                             <div class="easel-card-empty-note">
-                                ${query ? "Try a different search." : "Press Ctrl+Shift+E to start one."}
+                                ${query ? "Try a different search." : notes ? "Use the + card to start one." : "Press Ctrl+Shift+E to start one."}
                             </div>
                         </div>
                     `;
+            const footer = notes?.footer?.() ?? null;
 
             return html`
                 <div class="easel-card-grid">
-                    <button class="easel-card easel-card-new" type="button" title="New easel"
-                        @click=${() => window.ZenEaselLibrarySection?.create()}></button>
-                    ${shown?.length
-                        ? repeat(shown, board => board.id, board => this._card(html, board))
+                    <button class="easel-card easel-card-new" type="button"
+                        title=${notes ? "New Easel/Note" : "New easel"} ?data-merged=${!!notes}
+                        @click=${event => window.ZenEaselLibrarySection?.create(event.currentTarget)}></button>
+                    ${entries.length
+                        ? repeat(entries, entry => entry.key, entry => entry.tpl)
                         : empty}
                 </div>
+                ${footer}
             `;
         },
 
@@ -382,7 +438,25 @@
             section?.library?.constructor.toggle();
         },
 
-        create() {
+        // With Notes installed the + card asks which one to make; alone it makes an easel.
+        create(anchor) {
+            const notes = hub.providers.get("notes");
+            if (!notes || !anchor) { this._createEasel(); return; }
+            const popup = document.createXULElement("menupopup");
+            const add = (label, command) => {
+                const item = document.createXULElement("menuitem");
+                item.setAttribute("label", label);
+                item.addEventListener("command", command, { once: true });
+                popup.appendChild(item);
+            };
+            add("New Easel", () => this._createEasel());
+            add("New Note", () => notes.create().catch(e => console.error("[zen-easel] could not create note:", e)));
+            popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
+            document.getElementById("mainPopupSet")?.appendChild(popup);
+            popup.openPopup(anchor, "after_start");
+        },
+
+        _createEasel() {
             let title;
             try {
                 title = promptText("New easel", "Name this easel:", "Untitled Easel");
@@ -405,10 +479,11 @@
                 item.addEventListener("command", command, { once: true });
                 popup.appendChild(item);
             };
-            add("Open", () => this.open(board, null));
-            add("Rename", () => this.rename(board));
+            add("Open Easel", () => this.open(board, null));
+            add("Rename Easel…", () => this.rename(board));
+            add("Duplicate Easel", () => this.duplicate(board));
             popup.appendChild(document.createXULElement("menuseparator"));
-            add("Delete", () => this.remove(board));
+            add("Delete Easel", () => this.remove(board));
             popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
             document.getElementById("mainPopupSet")?.appendChild(popup);
             popup.openPopupAtScreen(event.screenX, event.screenY, true);
@@ -427,6 +502,12 @@
             window.gZenEaselHost?.renameBoard(board.id, trimmed)
                 .then(() => this._reloadOpen())
                 .catch(e => console.error("[zen-easel] could not rename easel:", e));
+        },
+
+        duplicate(board) {
+            window.gZenEaselHost?.duplicateBoard(board.id)
+                .then(() => this._reloadOpen())
+                .catch(e => console.error("[zen-easel] could not duplicate easel:", e));
         },
 
         remove(board) {
