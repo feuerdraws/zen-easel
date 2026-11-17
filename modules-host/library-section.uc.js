@@ -375,12 +375,12 @@
             window.__zlSchemeWatch?.apply();
             const entries = [];
             for (const board of shown || []) {
-                entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: this._card(html, board) });
+                entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: n => this._card(html, board, n) });
             }
             if (notes) {
                 try {
                     for (const item of notes.items(query)) {
-                        entries.push({ key: item.key, updatedAt: item.updatedAt || 0, tpl: html`${item.node}` });
+                        entries.push({ key: item.key, updatedAt: item.updatedAt || 0, tpl: n => { const c = item.node.querySelector?.(".zn-note-count"); if (c) c.textContent = String(n); return html`${item.node}`; } });
                     }
                 } catch (e) { console.error("[zen-easel] could not list notes:", e); }
             }
@@ -408,20 +408,19 @@
                         title=${notes ? "New Easel/Note" : "New easel"} ?data-merged=${!!notes}
                         @click=${event => window.ZenEaselLibrarySection?.create(event.currentTarget)}></button>
                     ${entries.length
-                        ? repeat(entries, entry => entry.key, entry => entry.tpl)
+                        ? repeat(entries, entry => entry.key, (entry, i) => entry.tpl(entries.length - i))
                         : empty}
                 </div>
                 ${footer}
             `;
         },
 
-        _card(html, board) {
+        _card(html, board, count) {
             const open = event => window.ZenEaselLibrarySection?.open(board, event);
             const title = board.title || "Untitled Easel";
             // By code point, so an emoji at the cut is not split into a lone surrogate.
             const chars = [...title];
             const short = chars.length > 20 ? `${chars.slice(0, 20).join("")}…` : title;
-            const count = typeof board.objectCount === "number" ? board.objectCount : 0;
             return html`
                 <button class="easel-card" type="button" title=${title}
                     @click=${event => { if (event.button === 0) open(event); }}
