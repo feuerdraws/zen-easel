@@ -395,7 +395,7 @@
                         <div class="zen-library-empty easel-card-empty">
                             <div>${query ? `No ${noun} match` : `No ${noun} yet`}</div>
                             <div class="easel-card-empty-note">
-                                ${query ? "Try a different search." : notes ? "Use the + card to start one." : "Press Ctrl+Shift+E to start one."}
+                                ${query ? "Try a different search." : notes ? "Use the + card to start one." : "Press Ctrl+Alt+E to start one."}
                             </div>
                         </div>
                     `;

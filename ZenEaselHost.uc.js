@@ -65,7 +65,102 @@
     // strokes itself with context-fill, and all three surfaces set that for free — see
     // the file's own header for why that is the property it uses rather than stroke.
     const BOARD_ICON = BASE + "resources/zen-easel-board.svg";
+    // Sidebar "+" menu and sidebar context menu arranger. Same snippet lives in Zen Easel
+    // and Zen Notes; it is idempotent, so whichever mod runs last leaves the same order.
+    const ZLMenus = (() => {
+        const PLUS_ID = "zenCreateNewPopup", SIDE_IDS = ["toolbar-context-menu", "zen-sidebar-context-menu"];
+        const PLUS = [
+            [/^create space$/, /^create folder$/],
+            [/^new easel$/, /^(new|create) note$/, /^new boost$/],
+            [/^new split$/, /^new tab$/]
+        ];
+        const SIDE = [
+            [/compact mode$/],
+            [/^new tab$/, /^new folder$/, /^live folder$/],
+            [/^new boost$/, /^new note$/, /^new easel$/],
+            [/^theme$/, /^set profile$/],
+            [/^reload selected tab$/, /^bookmark selected tab$/, /^select all tabs$/, /^reopen closed tab$/],
+            [/^tabs on the /, /^quick note$/]
+        ];
+        const BOOST_ICON = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="context-fill"><path d="M6 2l1.1 3.1L10.2 6.2 7.1 7.3 6 10.4 4.9 7.3 1.8 6.2l3.1-1.1zM12 8l.7 1.8 1.8.7-1.8.7L12 13l-.7-1.8-1.8-.7 1.8-.7z"/></svg>');
+        const labelOf = n => (n.getAttribute?.("label") || n.label || "").replace(/[….]+$/, "").trim().toLowerCase();
+        const isSep = n => n.localName === "menuseparator";
+        const visible = n => !n.hidden && n.getAttribute("hidden") !== "true" && !n.collapsed;
+
+        function newBoost() {
+            try {
+                if (window.gZenNotes?.currentNoteId) { window.gZenNotes.openNoteBoost(); return; }
+                const button = document.getElementById("zen-site-data-boost");
+                if (button && !button.disabled && button.getAttribute("disabled") !== "true") { button.doCommand ? button.doCommand() : button.click(); return; }
+                const { gZenBoostsManager: manager } = ChromeUtils.importESModule("resource:///modules/zen/boosts/ZenBoostsManager.sys.mjs");
+                const uri = gBrowser.currentURI;
+                if (!/^https?$/.test(uri.scheme)) return;
+                const boost = manager.loadActiveBoostFromStore(uri.host) || manager.createNewBoost(uri.host);
+                manager.openBoostWindow(window, boost, uri);
+            } catch (e) { console.error("[zen library menus] could not open a new boost:", e); }
+        }
+
+        function ensure(popup, kind) {
+            if (!popup.querySelector("[data-zl-boost]")) {
+                const item = document.createXULElement("menuitem");
+                item.setAttribute("label", "New Boost");
+                item.setAttribute("data-zl-boost", "true");
+                if (kind === "plus") { item.setAttribute("class", "menuitem-iconic"); item.setAttribute("image", BOOST_ICON); }
+                item.addEventListener("command", newBoost);
+                popup.append(item);
+            }
+        }
+
+        function arrange(popup, spec) {
+            const kids = [...popup.children];
+            for (const k of kids) {
+                if (k.hasAttribute("data-zl-sep")) k.remove();
+                else if (isSep(k) && !k.hasAttribute("data-zl-hid")) { k.setAttribute("data-zl-hid", k.hidden ? "1" : "0"); k.hidden = true; }
+            }
+            const items = [...popup.children].filter(k => !isSep(k));
+            const used = new Set();
+            const groups = spec.map(group => {
+                const found = [];
+                for (const re of group) {
+                    const hit = items.find(k => !used.has(k) && re.test(labelOf(k)));
+                    if (hit) { used.add(hit); found.push(hit); }
+                }
+                return found;
+            });
+            groups.push(items.filter(k => !used.has(k)));
+            let first = true;
+            for (const group of groups) {
+                if (!group.some(visible)) { for (const k of group) popup.append(k); continue; }
+                if (!first) { const sep = document.createXULElement("menuseparator"); sep.setAttribute("data-zl-sep", "true"); popup.append(sep); }
+                first = false;
+                for (const k of group) popup.append(k);
+            }
+        }
+
+        function kindOf(popup) { return popup.id === PLUS_ID ? "plus" : SIDE_IDS.includes(popup.id) ? "side" : null; }
+
+        return {
+            kindOf,
+            // `extra` lets the calling mod add its own rows before the shared arrangement.
+            run(popup, extra) {
+                const kind = kindOf(popup); if (!kind) return;
+                const go = () => { try { extra?.(popup, kind); ensure(popup, kind); arrange(popup, kind === "plus" ? PLUS : SIDE); } catch (e) { console.error("[zen library menus]", e); } };
+                go();
+                setTimeout(go, 0); // after Zen / the other mod have finished their own popupshowing work
+            },
+            restore() {
+                for (const id of [PLUS_ID, ...SIDE_IDS]) {
+                    const popup = document.getElementById(id); if (!popup) continue;
+                    popup.querySelectorAll("[data-zl-sep],[data-zl-boost]").forEach(n => n.remove());
+                    popup.querySelectorAll("[data-zl-hid]").forEach(n => { n.hidden = n.getAttribute("data-zl-hid") === "1"; n.removeAttribute("data-zl-hid"); });
+                }
+            }
+        };
+    })();
+
     const CREATE_COMMAND_ID = "cmd_zenEaselNew";
+    const IS_MAC = Services.appinfo.OS === "Darwin";
+    const NEW_EASEL_ACCEL = IS_MAC ? "⌘⌥E" : "Ctrl+Alt+E";
     const CREATE_MENUITEM_ID = "zen-easel-create-new";
 
     function easelPageUrl(easelId, { glance = false } = {}) {
@@ -140,6 +235,7 @@
                 // urlbar both fire. The popup is in the window from the start, unlike
                 // CustomizableUI, so this does not wait.
                 this._installCreateNew();
+                this._installMenusAndKeys();
 
                 // CustomizableUI is not ready at script-load time on a cold start.
                 this._buttonTimer = setTimeout(() => this._createToolbarButton(), 2000);
@@ -305,7 +401,43 @@
             }
         }
 
+        // Ctrl+Alt+E (Cmd+Option+E on macOS) and the "New Easel" row in the sidebar
+        // context menu; the menus are ordered by the shared ZLMenus arranger.
+        _installMenusAndKeys() {
+            this._onZlKey = event => {
+                if ((IS_MAC ? event.metaKey : event.ctrlKey) && event.altKey && !event.shiftKey && !(IS_MAC ? event.ctrlKey : event.metaKey)
+                    && (event.code === "KeyE" || (!event.code && event.key.toLowerCase() === "e"))) {
+                    event.preventDefault(); event.stopImmediatePropagation();
+                    if (!event.repeat) this.createEasel().catch(e => { console.error("[zen-easel] could not create easel:", e); this.toast("Could not create an easel"); });
+                }
+            };
+            window.addEventListener("keydown", this._onZlKey, true);
+            this._onZlPopup = event => {
+                if (event.target?.id !== "zenCreateNewPopup" && !ZLMenus.kindOf(event.target)) return;
+                ZLMenus.run(event.target, (popup, kind) => {
+                    const own = popup.querySelector(kind === "plus" ? "#" + CREATE_MENUITEM_ID : "[data-zl-easel]");
+                    if (own) { own.setAttribute("acceltext", NEW_EASEL_ACCEL); return; }
+                    const item = document.createXULElement("menuitem");
+                    item.setAttribute("label", "New Easel");
+                    item.setAttribute("acceltext", NEW_EASEL_ACCEL);
+                    item.setAttribute("data-zl-easel", "true");
+                    item.setAttribute("command", CREATE_COMMAND_ID);
+                    popup.append(item);
+                });
+            };
+            document.addEventListener("popupshowing", this._onZlPopup, false);
+        }
+
+        _uninstallMenusAndKeys() {
+            if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
+            if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
+            this._onZlKey = this._onZlPopup = null;
+            ZLMenus.restore();
+            document.querySelectorAll("[data-zl-easel]").forEach(n => n.remove());
+        }
+
         _uninstallCreateNew() {
+            this._uninstallMenusAndKeys();
             // Before _uninstallOmniboxAction, which reads this node back out of every
             // window to decide who should own the entry next.
             document.getElementById(CREATE_COMMAND_ID)?.remove();
