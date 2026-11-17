@@ -569,3 +569,6 @@ zen-library-easels-section .easel-card-new:hover::before {
   translate: 0;
   color: color-mix(in srgb, currentColor 85%, transparent);
 }
+
+/* While the shared menu arranger owns a menu, only its own separators are shown. */
+[data-zl-arranged] > menuseparator:not([data-zl-sep]) { display: none !important; }

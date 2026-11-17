@@ -65,58 +65,89 @@
     // strokes itself with context-fill, and all three surfaces set that for free — see
     // the file's own header for why that is the property it uses rather than stroke.
     const BOARD_ICON = BASE + "resources/zen-easel-board.svg";
-    // Sidebar "+" menu and sidebar context menu arranger. Same snippet lives in Zen Easel
-    // and Zen Notes; it is idempotent, so whichever mod runs last leaves the same order.
+    // Sidebar "+" menu, sidebar context menu and "+ New Tab" context menu arranger. Same snippet
+    // lives in Zen Easel and Zen Notes; it is idempotent, so whichever mod runs last leaves the same order.
     const ZLMenus = (() => {
         const PLUS_ID = "zenCreateNewPopup", SIDE_IDS = ["toolbar-context-menu", "zen-sidebar-context-menu"];
-        const PLUS = [
-            [/^create space$/, /^create folder$/],
-            [/^new easel$/, /^(new|create) note$/, /^new boost$/],
-            [/^new split$/, /^new tab$/]
+        const SPECS = {
+            plus: [
+                [/^create space$/, /^create folder$/],
+                [/^new easel$/, /^(new|create) note$/, /^new boost$/],
+                [/^new split$/, /^new tab$/]
+            ],
+            side: [
+                [/compact mode$/],
+                [/^new tab$/, /^new folder$/, /^live folder$/],
+                [/^new boost$/, /^new note$/, /^new easel$/],
+                [/^theme$/, /^set profile$/],
+                [/^reload selected tab$/, /^bookmark selected tab$/, /^select all tabs$/, /^reopen closed tab$/],
+                [/^tabs on the /, /^quick note$/]
+            ],
+            newtab: [
+                [/^new tab$/],
+                [/^new easel$/, /^(new|create) note$/]
+            ]
+        };
+        const BOOST_ICON_CANDIDATES = [
+            "chrome://browser/skin/zen-icons/boost.svg", "chrome://browser/skin/zen-icons/boosts.svg",
+            "chrome://browser/skin/zen-icons/paintbrush.svg", "chrome://browser/skin/zen-icons/sparkles.svg"
         ];
-        const SIDE = [
-            [/compact mode$/],
-            [/^new tab$/, /^new folder$/, /^live folder$/],
-            [/^new boost$/, /^new note$/, /^new easel$/],
-            [/^theme$/, /^set profile$/],
-            [/^reload selected tab$/, /^bookmark selected tab$/, /^select all tabs$/, /^reopen closed tab$/],
-            [/^tabs on the /, /^quick note$/]
-        ];
-        const BOOST_ICON = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="context-fill"><path d="M6 2l1.1 3.1L10.2 6.2 7.1 7.3 6 10.4 4.9 7.3 1.8 6.2l3.1-1.1zM12 8l.7 1.8 1.8.7-1.8.7L12 13l-.7-1.8-1.8-.7 1.8-.7z"/></svg>');
+        let boostIcon = "chrome://global/skin/icons/highlights.svg";
+        let boostIconResolved = false;
         const labelOf = n => (n.getAttribute?.("label") || n.label || "").replace(/[….]+$/, "").trim().toLowerCase();
         const isSep = n => n.localName === "menuseparator";
         const visible = n => !n.hidden && n.getAttribute("hidden") !== "true" && !n.collapsed;
 
+        // Reuses the icon Zen itself shows for Boosts, falling back to a generic sparkle.
+        async function resolveBoostIcon() {
+            if (boostIconResolved) return;
+            boostIconResolved = true;
+            const fromCss = el => { try { return /url\(["']?([^"')]+)["']?\)/.exec(getComputedStyle(el).listStyleImage || "")?.[1] || null; } catch { return null; } };
+            const button = document.getElementById("zen-site-data-boost");
+            const found = (button && (fromCss(button.querySelector(".toolbarbutton-icon") || button) || fromCss(button))) || button?.getAttribute("image");
+            if (found && !found.startsWith("data:")) boostIcon = found;
+            else for (const url of BOOST_ICON_CANDIDATES) {
+                try { if ((await fetch(url)).ok) { boostIcon = url; break; } } catch {}
+            }
+            document.querySelectorAll("[data-zl-boost][image]").forEach(n => n.setAttribute("image", boostIcon));
+        }
+
+        // Boosts only exist for normal web pages: not Zen's own pages, notes or easels.
+        function boostAllowed() {
+            try {
+                const uri = gBrowser.selectedBrowser?.currentURI;
+                return !!uri && /^https?$/.test(uri.scheme);
+            } catch { return false; }
+        }
+
         function newBoost() {
             try {
-                if (window.gZenNotes?.currentNoteId) { window.gZenNotes.openNoteBoost(); return; }
+                if (!boostAllowed()) return;
                 const button = document.getElementById("zen-site-data-boost");
                 if (button && !button.disabled && button.getAttribute("disabled") !== "true") { button.doCommand ? button.doCommand() : button.click(); return; }
                 const { gZenBoostsManager: manager } = ChromeUtils.importESModule("resource:///modules/zen/boosts/ZenBoostsManager.sys.mjs");
                 const uri = gBrowser.currentURI;
-                if (!/^https?$/.test(uri.scheme)) return;
                 const boost = manager.loadActiveBoostFromStore(uri.host) || manager.createNewBoost(uri.host);
                 manager.openBoostWindow(window, boost, uri);
             } catch (e) { console.error("[zen library menus] could not open a new boost:", e); }
         }
 
-        function ensure(popup, kind) {
-            if (!popup.querySelector("[data-zl-boost]")) {
-                const item = document.createXULElement("menuitem");
+        function ensureBoost(popup, kind) {
+            let item = popup.querySelector("[data-zl-boost]");
+            if (!item) {
+                item = document.createXULElement("menuitem");
                 item.setAttribute("label", "New Boost");
                 item.setAttribute("data-zl-boost", "true");
-                if (kind === "plus") { item.setAttribute("class", "menuitem-iconic"); item.setAttribute("image", BOOST_ICON); }
+                if (kind === "plus") { item.setAttribute("class", "menuitem-iconic"); item.setAttribute("image", boostIcon); }
                 item.addEventListener("command", newBoost);
                 popup.append(item);
             }
+            item.hidden = !boostAllowed();
         }
 
         function arrange(popup, spec) {
-            const kids = [...popup.children];
-            for (const k of kids) {
-                if (k.hasAttribute("data-zl-sep")) k.remove();
-                else if (isSep(k) && !k.hasAttribute("data-zl-hid")) { k.setAttribute("data-zl-hid", k.hidden ? "1" : "0"); k.hidden = true; }
-            }
+            popup.setAttribute("data-zl-arranged", "true"); // CSS hides Zen's own separators meanwhile
+            for (const k of [...popup.children]) if (k.hasAttribute("data-zl-sep")) k.remove();
             const items = [...popup.children].filter(k => !isSep(k));
             const used = new Set();
             const groups = spec.map(group => {
@@ -137,22 +168,34 @@
             }
         }
 
-        function kindOf(popup) { return popup.id === PLUS_ID ? "plus" : SIDE_IDS.includes(popup.id) ? "side" : null; }
+        function kindOf(popup) {
+            if (!popup?.id && !popup?.children) return null;
+            if (popup.id === PLUS_ID) return "plus";
+            if (SIDE_IDS.includes(popup.id)) return "side";
+            const labels = [...(popup.children || [])].map(labelOf);
+            return labels.includes("new tab") && labels.includes("manage containers") ? "newtab" : null;
+        }
 
         return {
             kindOf,
             // `extra` lets the calling mod add its own rows before the shared arrangement.
             run(popup, extra) {
                 const kind = kindOf(popup); if (!kind) return;
-                const go = () => { try { extra?.(popup, kind); ensure(popup, kind); arrange(popup, kind === "plus" ? PLUS : SIDE); } catch (e) { console.error("[zen library menus]", e); } };
+                resolveBoostIcon();
+                const go = () => {
+                    try {
+                        extra?.(popup, kind);
+                        if (kind !== "newtab") ensureBoost(popup, kind);
+                        arrange(popup, SPECS[kind]);
+                    } catch (e) { console.error("[zen library menus]", e); }
+                };
                 go();
                 setTimeout(go, 0); // after Zen / the other mod have finished their own popupshowing work
             },
             restore() {
-                for (const id of [PLUS_ID, ...SIDE_IDS]) {
-                    const popup = document.getElementById(id); if (!popup) continue;
+                for (const popup of document.querySelectorAll("[data-zl-arranged]")) {
                     popup.querySelectorAll("[data-zl-sep],[data-zl-boost]").forEach(n => n.remove());
-                    popup.querySelectorAll("[data-zl-hid]").forEach(n => { n.hidden = n.getAttribute("data-zl-hid") === "1"; n.removeAttribute("data-zl-hid"); });
+                    popup.removeAttribute("data-zl-arranged");
                 }
             }
         };
@@ -405,18 +448,36 @@
         // context menu; the menus are ordered by the shared ZLMenus arranger.
         _installMenusAndKeys() {
             this._onZlKey = event => {
-                if ((IS_MAC ? event.metaKey : event.ctrlKey) && event.altKey && !event.shiftKey && !(IS_MAC ? event.ctrlKey : event.metaKey)
-                    && (event.code === "KeyE" || (!event.code && event.key.toLowerCase() === "e"))) {
+                if (event.shiftKey || event.code !== "KeyE") return;
+                // Firefox reports AltGr as AltGraph with ctrlKey/altKey cleared whenever the layout types a character
+                // on that key (AltGr+E is "°" on Brazilian ABNT2). Count that as Ctrl+Alt, except while typing in a field.
+                const typing = event.target?.closest?.("input, textarea, [contenteditable='true'], [contenteditable='']") || event.target?.isContentEditable;
+                const altGr = !IS_MAC && event.getModifierState?.("AltGraph") && !typing;
+                const chord = (IS_MAC ? event.metaKey : event.ctrlKey) && event.altKey && !(IS_MAC ? event.ctrlKey : event.metaKey);
+                if (chord || altGr) {
                     event.preventDefault(); event.stopImmediatePropagation();
                     if (!event.repeat) this.createEasel().catch(e => { console.error("[zen-easel] could not create easel:", e); this.toast("Could not create an easel"); });
                 }
             };
             window.addEventListener("keydown", this._onZlKey, true);
+            // Disable any built-in <key> bound to Ctrl+Alt+E so it cannot swallow the chord first.
+            this._zlKeys ||= new Map();
+            for (const key of document.querySelectorAll("key")) {
+                const mods = (key.getAttribute("modifiers") || "").split(/[\s,]+/);
+                if ((key.getAttribute("key") || "").toLowerCase() !== "e" || !mods.includes("accel") || !mods.includes("alt") || mods.includes("shift")) continue;
+                if (this._zlKeys.has(key)) continue;
+                this._zlKeys.set(key, key.getAttribute("disabled"));
+                key.setAttribute("disabled", "true");
+            }
             this._onZlPopup = event => {
-                if (event.target?.id !== "zenCreateNewPopup" && !ZLMenus.kindOf(event.target)) return;
+                if (!ZLMenus.kindOf(event.target)) return;
                 ZLMenus.run(event.target, (popup, kind) => {
                     const own = popup.querySelector(kind === "plus" ? "#" + CREATE_MENUITEM_ID : "[data-zl-easel]");
-                    if (own) { own.setAttribute("acceltext", NEW_EASEL_ACCEL); return; }
+                    if (own) {
+                        own.setAttribute("acceltext", NEW_EASEL_ACCEL);
+                        if (kind === "plus") own.classList.add("menuitem-iconic"); // Zen only draws the shortcut column on iconic rows
+                        return;
+                    }
                     const item = document.createXULElement("menuitem");
                     item.setAttribute("label", "New Easel");
                     item.setAttribute("acceltext", NEW_EASEL_ACCEL);
@@ -432,6 +493,8 @@
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
             this._onZlKey = this._onZlPopup = null;
+            for (const [key, was] of this._zlKeys || []) { if (was === null) key.removeAttribute("disabled"); else key.setAttribute("disabled", was); }
+            this._zlKeys?.clear();
             ZLMenus.restore();
             document.querySelectorAll("[data-zl-easel]").forEach(n => n.remove());
         }
