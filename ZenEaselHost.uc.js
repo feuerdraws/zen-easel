@@ -168,12 +168,25 @@
             }
         }
 
+        // The menu behind right-clicking "+ New Tab". Matched by its id, by what was right-clicked, or by
+        // having a "New Tab" row next to container rows, since Zen/Firefox give it no stable id of its own.
+        function isNewTabMenu(popup, labels) {
+            if (/new-?tab/i.test(popup.id || "")) return true;
+            if (!labels.includes("new tab")) return false;
+            if (labels.some(label => label.includes("container"))) return true;
+            const trigger = popup.triggerNode;
+            if (!trigger?.closest) return false;
+            if (trigger.closest('#new-tab-button, #zen-new-tab-button, [id*="newtab" i], [id*="new-tab" i], [command="cmd_newNavigatorTab"], [command="cmd_newNavigatorTabNoEvent"]')) return true;
+            return labelOf(trigger.closest("[label]") || trigger) === "new tab";
+        }
+
         function kindOf(popup) {
             if (!popup?.id && !popup?.children) return null;
             if (popup.id === PLUS_ID) return "plus";
             if (SIDE_IDS.includes(popup.id)) return "side";
+            if (popup.id === "tabContextMenu" || popup.id === "contentAreaContextMenu") return null;
             const labels = [...(popup.children || [])].map(labelOf);
-            return labels.includes("new tab") && labels.includes("manage containers") ? "newtab" : null;
+            return isNewTabMenu(popup, labels) ? "newtab" : null;
         }
 
         return {
@@ -474,8 +487,21 @@
                 ZLMenus.run(event.target, (popup, kind) => {
                     const own = popup.querySelector(kind === "plus" ? "#" + CREATE_MENUITEM_ID : "[data-zl-easel]");
                     if (own) {
+                        if (kind === "plus" && !own.hasAttribute("data-zl-fresh")) {
+                            // Rebuilt like Zen's other rows (and unlike the original, with no <command> link) so the
+                            // shortcut column draws; it still runs the same command.
+                            const fresh = document.createXULElement("menuitem");
+                            fresh.id = CREATE_MENUITEM_ID;
+                            fresh.setAttribute("label", "New Easel");
+                            fresh.setAttribute("class", "menuitem-iconic");
+                            fresh.setAttribute("image", BOARD_ICON);
+                            fresh.setAttribute("acceltext", NEW_EASEL_ACCEL);
+                            fresh.setAttribute("data-zl-fresh", "true");
+                            fresh.addEventListener("command", () => document.getElementById(CREATE_COMMAND_ID)?.doCommand());
+                            own.replaceWith(fresh);
+                            return;
+                        }
                         own.setAttribute("acceltext", NEW_EASEL_ACCEL);
-                        if (kind === "plus") own.classList.add("menuitem-iconic"); // Zen only draws the shortcut column on iconic rows
                         return;
                     }
                     const item = document.createXULElement("menuitem");
