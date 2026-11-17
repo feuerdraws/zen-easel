@@ -391,6 +391,15 @@ zen-library [data-section="easels"] :is(.zen-library-tab-icon-image, .empty-stat
   background-image: url("chrome://sine/content/zen-easel/resources/library-easels-sprite.svg");
 }
 
+/* Card colors follow Zen's own light/dark state (data-zl-scheme, set by the mod's JS),
+   because light-dark() alone tracks the chrome's color-scheme, which Zen's theme setting does not change. */
+:root {
+  --zl-frame: light-dark(#ffffff, #3c3c3c); --zl-body: light-dark(#e8e8e8, #2a2a2a);
+  --zl-body-hover: light-dark(#dedede, #323232); --zl-ink: light-dark(#111111, #ffffff); --zl-mix: light-dark(#000000, #ffffff);
+}
+:root[data-zl-scheme="dark"] { --zl-frame:#3c3c3c; --zl-body:#2a2a2a; --zl-body-hover:#323232; --zl-ink:#ffffff; --zl-mix:#ffffff; }
+:root[data-zl-scheme="light"] { --zl-frame:#ffffff; --zl-body:#e8e8e8; --zl-body-hover:#dedede; --zl-ink:#111111; --zl-mix:#000000; }
+
 /* The older easel cards, tightened so two columns sit in the library's
    native column (section max-width is calc(418px - 110px)). */
 zen-library-easels-section .easel-card-grid {
@@ -441,7 +450,7 @@ zen-library-easels-section .easel-card-frame {
   width: 100%;
   padding: var(--easel-card-frame);
   border-radius: calc(var(--easel-card-radius) - 2px);
-  background: light-dark(#ffffff, #3c3c3c);
+  background: var(--zl-frame);
   box-sizing: border-box;
 }
 
@@ -457,14 +466,14 @@ zen-library-easels-section .easel-card-body {
   min-height: 0;
   padding: 8px 8px 7px;
   border-radius: calc(var(--easel-card-radius) - 4px);
-  background: light-dark(#e8e8e8, #2a2a2a);
-  color: light-dark(#111111, #ffffff);
+  background: var(--zl-body);
+  color: var(--zl-ink);
   box-sizing: border-box;
   overflow: hidden;
 }
 
 zen-library-easels-section .easel-card:hover:not(.easel-card-new) .easel-card-body {
-  background: light-dark(#dedede, #323232);
+  background: var(--zl-body-hover);
 }
 
 zen-library-easels-section .easel-card:focus-visible {
@@ -502,7 +511,7 @@ zen-library-easels-section .easel-card-mark {
   height: 18px;
   flex-shrink: 0;
   /* Space accent, pushed toward white (dark) or black (light) so it stays readable. */
-  color: color-mix(in srgb, var(--zen-primary-color, #8b9ac0) 62%, light-dark(#000000, #ffffff));
+  color: color-mix(in srgb, var(--zen-primary-color, #8b9ac0) 62%, var(--zl-mix));
 }
 
 zen-library-easels-section .easel-card-squiggle {

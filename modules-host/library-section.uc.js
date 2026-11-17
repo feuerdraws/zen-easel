@@ -14,6 +14,26 @@
 "use strict";
 
 (function () {
+(() => {
+  // Mirrors Zen's light/dark state onto <html data-zl-scheme>. Same snippet lives in Zen Easel.
+  const rootEl = document.documentElement;
+  const apply = () => {
+    let dark; try { dark = window.gZenThemePicker?.isDarkMode; } catch {}
+    if (typeof dark !== "boolean") dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const value = dark ? "dark" : "light";
+    if (rootEl.getAttribute("data-zl-scheme") !== value) rootEl.setAttribute("data-zl-scheme", value);
+  };
+  apply();
+  if (window.__zlSchemeWatch) { window.__zlSchemeWatch.apply = apply; return; }
+  window.__zlSchemeWatch = { apply };
+  const run = () => window.__zlSchemeWatch.apply();
+  new MutationObserver(run).observe(rootEl, { attributes: true });
+  try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", run); } catch {}
+  for (const pref of ["browser.theme.toolbar-theme", "browser.theme.content-theme", "zen.theme.color-prefs.use-workspace-colors"]) {
+    try { Services.prefs.addObserver(pref, { observe: () => setTimeout(run, 50) }); } catch {}
+  }
+  window.addEventListener("focus", run);
+})();
     const BASE = "chrome://sine/content/zen-easel/";
     const STORE = BASE + "background/store.sys.mjs";
     const SECTION_ID = "easels";
@@ -352,6 +372,7 @@
                 ? boards.filter(board => !query || (board.title || "").toLowerCase().includes(query))
                 : null;
 
+            window.__zlSchemeWatch?.apply();
             const entries = [];
             for (const board of shown || []) {
                 entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: this._card(html, board) });
@@ -379,6 +400,7 @@
                         </div>
                     `;
             const footer = notes?.footer?.() ?? null;
+            if (footer) setTimeout(() => notes.place?.(), 60);
 
             return html`
                 <div class="easel-card-grid">
