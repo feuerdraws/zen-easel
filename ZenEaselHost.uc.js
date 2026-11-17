@@ -518,15 +518,16 @@
             };
             document.addEventListener("popupshowing", this._onZlPopup, false);
             this._onEaselRenameKey = event => {
-                if (!this._easelRenaming || event.target?.id !== "tab-label-input") return;
-                if (event.key === "Escape") { this._easelRenaming = null; return; }
-                if (event.key !== "Enter") return;
-                const { id } = this._easelRenaming; this._easelRenaming = null;
-                const title = event.target.value.trim();
-                if (title) setTimeout(() => this.renameBoard(id, title).then(() => window.ZenEaselLibrarySection?._reloadOpen()).catch(e => console.error("[zen-easel] rename:", e)), 0);
+                if (event.target?.id !== "tab-label-input") return;
+                if (event.key === "Escape") { this._easelCancelled = event.target; return; }
+                if (event.key === "Enter" && !event.isComposing) this._commitEaselRename(event.target);
             };
             window.addEventListener("keydown", this._onEaselRenameKey, true);
-            this._onEaselRenameBlur = event => { if (event.target?.id === "tab-label-input") setTimeout(() => { this._easelRenaming = null; }, 200); };
+            this._onEaselRenameBlur = event => {
+                if (event.target?.id !== "tab-label-input") return;
+                if (this._easelCancelled === event.target) { this._easelCancelled = null; return; }
+                this._commitEaselRename(event.target);
+            };
             document.addEventListener("focusout", this._onEaselRenameBlur, true);
             this._onEaselTabMenu = event => this._easelTabMenu(event);
             document.addEventListener("popupshowing", this._onEaselTabMenu, false);
@@ -560,12 +561,16 @@
                 added.push(node); popup.append(node);
             };
             const sep = () => { const node = document.createXULElement("menuseparator"); added.push(node); popup.append(node); };
-            item("Rename Easel…", () => {
-                // Zen's own inline tab rename; Enter below saves it to the board.
+            // Zen's own "Change label…" row, found before the menu is trimmed down. Running it starts the
+            // normal inline tab rename; the key/blur hooks below copy the result into the board's title.
+            const native = [...popup.querySelectorAll("menuitem")].find(node =>
+                /change label|edit label|rename/i.test(node.getAttribute("label") || node.label || "")
+                || /edit-tab|rename-tab|change-label|edit-label/i.test(node.id || ""));
+            item("Change Label…", () => {
+                if (native) { native.doCommand(); return; }
                 const manager = globalThis.gZenVerticalTabsManager;
-                if (!manager?.renameTabStart) return section()?.rename({ id: easelId, title: "Untitled Easel" });
-                this._easelRenaming = { id: easelId };
-                manager.renameTabStart({ target: tab, type: "command", stopPropagation() {}, preventDefault() {} });
+                if (manager?.renameTabStart) manager.renameTabStart({ target: tab, type: "command", stopPropagation() {}, preventDefault() {} });
+                else section()?.rename({ id: easelId, title: "Untitled Easel" });
             });
             item("Duplicate Easel", async () => section()?.duplicate(await board()));
             sep();
@@ -580,6 +585,22 @@
             this._restoreEaselTabMenu = restore;
             const hidden = e => { if (e.target !== popup) return; popup.removeEventListener("popuphidden", hidden); restore(); };
             popup.addEventListener("popuphidden", hidden);
+        }
+
+        // Zen's inline tab rename (Change Label…) on an easel tab also renames the board itself.
+        _commitEaselRename(input) {
+            const tab = input.closest?.("tab.tabbrowser-tab") || globalThis.gZenVerticalTabsManager?._tabEdited;
+            if (!tab || !this._matchEaselTab(tab)) return;
+            const id = this._easelIdForTab(tab);
+            const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s*[—-]\s*Easel$/, "").trim();
+            if (!id || !title) return;
+            const key = id + "|" + title;
+            if (this._easelLastRename === key) return; // Enter is followed by a blur
+            this._easelLastRename = key;
+            setTimeout(() => { this._easelLastRename = null; }, 500);
+            setTimeout(() => this.renameBoard(id, title)
+                .then(() => window.ZenEaselLibrarySection?._reloadOpen())
+                .catch(e => console.error("[zen-easel] rename:", e)), 0);
         }
 
         _uninstallMenusAndKeys() {

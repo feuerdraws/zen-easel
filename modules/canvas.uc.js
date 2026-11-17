@@ -1363,6 +1363,8 @@
 
             const apply = value => () => {
                 this.doc.background = value;
+                // The library tile follows the board while the wheel is still being dragged.
+                try { Services.obs.notifyObservers(null, "zen-easel-live-background", JSON.stringify({ id: this.doc.id, background: value })); } catch (e) { }
                 // A frame either way — the wash is a grid layer, and background is part of
                 // the signature _applyGrid compares against, which _paintNow runs first.
                 // But only a board whose opaque colour moved changes what the *objects* look

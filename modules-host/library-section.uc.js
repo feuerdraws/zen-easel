@@ -75,6 +75,14 @@
         _cancelled: false,
         _labelWatch: new WeakMap(),
         _observers: new Set(),
+        _liveBg: new Map(),
+
+        _closeLibrary(section) {
+            const lib = section?.library ?? document.querySelector("zen-library");
+            const Library = lib?.constructor;
+            if (Library?.animateProgress) Library.animateProgress(0);
+            else Library?.toggle?.();
+        },
 
         install() {
             this._cancelled = false;
@@ -82,6 +90,23 @@
             this._lastTab = lastTabPref();
             this._provider = { id: "easels", label: "Easels", newLabel: "Easel" };
             this._hubUnsub = hub.subscribe(type => this._onHub(type));
+            // Tiles follow edits made in an open easel: live while a background is dragged, then on every save.
+            this._indexObserver = {
+                observe: (subject, topic, data) => {
+                    if (topic === "zen-easel-live-background") {
+                        try {
+                            const { id, background } = JSON.parse(data);
+                            this._liveBg.set(id, background);
+                            document.querySelector("zen-library-easels-section")?.requestUpdate();
+                        } catch (e) { }
+                        return;
+                    }
+                    this._liveBg.delete(data);
+                    clearTimeout(this._reloadTimer);
+                    this._reloadTimer = setTimeout(() => this._reloadOpen(), 120);
+                }
+            };
+            for (const topic of ["zen-easel-index-changed", "zen-easel-live-background"]) Services.obs.addObserver(this._indexObserver, topic);
             hub.register(this._provider);
             const run = () => {
                 if (this._cancelled || window.ZenEaselLibrarySection !== this) return;
@@ -109,6 +134,11 @@
         destroy() {
             this._cancelled = true;
             this._hubUnsub?.(); this._hubUnsub = null;
+            if (this._indexObserver) {
+                for (const topic of ["zen-easel-index-changed", "zen-easel-live-background"]) { try { Services.obs.removeObserver(this._indexObserver, topic); } catch (e) { } }
+                this._indexObserver = null;
+            }
+            clearTimeout(this._reloadTimer);
             hub.unregister("easels", this._provider); this._provider = null;
             if (this._preload) {
                 window.cancelIdleCallback(this._preload);
@@ -451,7 +481,7 @@
                         <path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31" stroke="currentColor" stroke-width="7.1" stroke-linecap="round" stroke-linejoin="round"></path>
                     </svg>
                 </div>`;
-            const style = this._bgStyle(board.background);
+            const style = this._bgStyle(this._liveBg.get(board.id) ?? board.background);
             if (renaming) {
                 // Not a <button> while renaming: a text field inside a button cannot take focus or spaces.
                 return html`
@@ -506,7 +536,7 @@
                 return;
             }
             host.openEasel(board.id);
-            section?.library?.constructor.toggle();
+            this._closeLibrary(section);
         },
 
         // With Notes installed the + card asks which one to make; alone it makes an easel.
@@ -530,7 +560,7 @@
         // No name prompt: the new board opens with its heading already selected, so typing names it.
         _createEasel() {
             window.gZenEaselHost?.createEasel("Untitled Easel")
-                .then(() => document.querySelector("zen-library-easels-section")?.library?.constructor.toggle())
+                .then(() => this._closeLibrary(document.querySelector("zen-library-easels-section")))
                 .catch(e => console.error("[zen-easel] could not create easel:", e));
         },
 
@@ -591,7 +621,7 @@
                     this._reloadOpen();
                     if (!entry) return;
                     window.gZenEaselHost.openEasel(entry.id);
-                    document.querySelector("zen-library-easels-section")?.library?.constructor.toggle();
+                    this._closeLibrary(document.querySelector("zen-library-easels-section"));
                 })
                 .catch(e => console.error("[zen-easel] could not duplicate easel:", e));
         },

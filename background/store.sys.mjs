@@ -519,6 +519,8 @@ class EaselStoreImpl {
                 if (typeof meta.background === "string") entry.background = meta.background;
             }
         }
+        // Lets an open library redraw this board's tile (title, count, background) without being reopened.
+        try { Services.obs.notifyObservers(null, "zen-easel-index-changed", id); } catch (e) { }
 
         if (this._saveTimer) return;
         const delay = Math.max(0, prefInt("zen.easel.autosave-ms", DEFAULT_AUTOSAVE_MS));
