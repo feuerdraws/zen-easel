@@ -517,6 +517,17 @@
                 });
             };
             document.addEventListener("popupshowing", this._onZlPopup, false);
+            this._onEaselRenameKey = event => {
+                if (!this._easelRenaming || event.target?.id !== "tab-label-input") return;
+                if (event.key === "Escape") { this._easelRenaming = null; return; }
+                if (event.key !== "Enter") return;
+                const { id } = this._easelRenaming; this._easelRenaming = null;
+                const title = event.target.value.trim();
+                if (title) setTimeout(() => this.renameBoard(id, title).then(() => window.ZenEaselLibrarySection?._reloadOpen()).catch(e => console.error("[zen-easel] rename:", e)), 0);
+            };
+            window.addEventListener("keydown", this._onEaselRenameKey, true);
+            this._onEaselRenameBlur = event => { if (event.target?.id === "tab-label-input") setTimeout(() => { this._easelRenaming = null; }, 200); };
+            document.addEventListener("focusout", this._onEaselRenameBlur, true);
             this._onEaselTabMenu = event => this._easelTabMenu(event);
             document.addEventListener("popupshowing", this._onEaselTabMenu, false);
         }
@@ -549,7 +560,13 @@
                 added.push(node); popup.append(node);
             };
             const sep = () => { const node = document.createXULElement("menuseparator"); added.push(node); popup.append(node); };
-            item("Rename Easel…", async () => section()?.rename(await board()));
+            item("Rename Easel…", () => {
+                // Zen's own inline tab rename; Enter below saves it to the board.
+                const manager = globalThis.gZenVerticalTabsManager;
+                if (!manager?.renameTabStart) return section()?.rename({ id: easelId, title: "Untitled Easel" });
+                this._easelRenaming = { id: easelId };
+                manager.renameTabStart({ target: tab, type: "command", stopPropagation() {}, preventDefault() {} });
+            });
             item("Duplicate Easel", async () => section()?.duplicate(await board()));
             sep();
             item(tab.pinned ? "Unpin Easel" : "Pin Easel", () => tab.pinned ? gBrowser.unpinTab(tab) : gBrowser.pinTab(tab));
@@ -569,6 +586,8 @@
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
             if (this._onEaselTabMenu) document.removeEventListener("popupshowing", this._onEaselTabMenu, false);
+            if (this._onEaselRenameKey) window.removeEventListener("keydown", this._onEaselRenameKey, true);
+            if (this._onEaselRenameBlur) document.removeEventListener("focusout", this._onEaselRenameBlur, true);
             this._restoreEaselTabMenu?.();
             this._onZlKey = this._onZlPopup = null;
             for (const [key, was] of this._zlKeys || []) { if (was === null) key.removeAttribute("disabled"); else key.setAttribute("disabled", was); }

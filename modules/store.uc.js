@@ -635,7 +635,8 @@
             }), {
                 title: doc.title,
                 updatedAt: doc.updatedAt,
-                objectCount: doc.objects.length
+                objectCount: doc.objects.length,
+                background: doc.background || window.ZenEaselObjects.DEFAULT_BACKGROUND
             });
         }
 

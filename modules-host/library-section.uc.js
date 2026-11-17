@@ -415,14 +415,68 @@
             `;
         },
 
+        // The tile takes on the board's own background: the card body, its text and the accent follow it.
+        _bgStyle(key) {
+            const PRESETS = { arc: "#FAFAFC", white: "#FFFFFF", paper: "#F6F2E9", mist: "#E9EDF1", slate: "#2A2E35", ink: "#161B2E", black: "#0B0B0C" };
+            let hex, alpha = 1;
+            const custom = /^custom:(#[0-9a-f]{6}):([01](?:\.\d{1,2})?)$/i.exec(key || "");
+            if (custom) { hex = custom[1]; alpha = parseFloat(custom[2]); if (alpha < 0.2) return ""; }
+            else hex = PRESETS[key];
+            if (!hex) return ""; // "theme" and "transparent" keep the default card
+            alpha = Math.max(alpha, 0.6);
+            const dark = document.documentElement.getAttribute("data-zl-scheme") === "dark";
+            const base = dark ? [42, 42, 42] : [232, 232, 232];
+            const rgb = [1, 3, 5].map((i, n) => Math.round(base[n] * (1 - alpha) + parseInt(hex.slice(i, i + 2), 16) * alpha));
+            const light = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) > 140;
+            const toward = light ? 0 : 255;
+            const hover = rgb.map(v => Math.round(v * 0.92 + toward * 0.08));
+            return `--zl-body: rgb(${rgb}); --zl-body-hover: rgb(${hover}); --zl-ink: ${light ? "#111111" : "#ffffff"}; --zl-mix: ${light ? "#000000" : "#ffffff"};`;
+        },
+
+        _tooltip(board) {
+            if (!board.createdAt) return board.title || "Untitled Easel";
+            return "Created " + new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(board.createdAt));
+        },
+
         _card(html, board, count) {
             const open = event => window.ZenEaselLibrarySection?.open(board, event);
             const title = board.title || "Untitled Easel";
             // By code point, so an emoji at the cut is not split into a lone surrogate.
             const chars = [...title];
             const short = chars.length > 20 ? `${chars.slice(0, 20).join("")}…` : title;
+            const renaming = this._renamingId === board.id;
+            const mark = html`
+                <div class="easel-card-mark">
+                    <svg class="easel-card-squiggle" viewBox="20 38 76 68" fill="none" aria-hidden="true">
+                        <path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31" stroke="currentColor" stroke-width="7.1" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </div>`;
+            const style = this._bgStyle(board.background);
+            if (renaming) {
+                // Not a <button> while renaming: a text field inside a button cannot take focus or spaces.
+                return html`
+                    <div class="easel-card" role="group" title=${this._tooltip(board)}>
+                        <div class="easel-card-frame">
+                            <div class="easel-card-body" style=${style}>
+                                <div class="easel-card-count">${count}</div>
+                                <div class="easel-card-copy">
+                                    ${mark}
+                                    <input class="easel-card-rename" type="text" .value=${title} spellcheck="false"
+                                        @click=${event => event.stopPropagation()}
+                                        @keydown=${event => {
+                                            event.stopPropagation();
+                                            if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); this._finishRename(board, event.target.value); }
+                                            else if (event.key === "Escape") { event.preventDefault(); this._finishRename(board, null); }
+                                        }}
+                                        @blur=${event => this._finishRename(board, event.target.value)}>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
             return html`
-                <button class="easel-card" type="button" title=${title}
+                <button class="easel-card" type="button" title=${this._tooltip(board)}
                     @click=${event => { if (event.button === 0) open(event); }}
                     @auxclick=${event => {
                         if (event.button !== 1) return;
@@ -431,14 +485,10 @@
                     }}
                     @contextmenu=${event => window.ZenEaselLibrarySection?.menu(board, event)}>
                     <div class="easel-card-frame">
-                        <div class="easel-card-body">
+                        <div class="easel-card-body" style=${style}>
                             <div class="easel-card-count">${count}</div>
                             <div class="easel-card-copy">
-                                <div class="easel-card-mark">
-                                    <svg class="easel-card-squiggle" viewBox="20 38 76 68" fill="none" aria-hidden="true">
-                                        <path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31" stroke="currentColor" stroke-width="7.1" stroke-linecap="round" stroke-linejoin="round"></path>
-                                    </svg>
-                                </div>
+                                ${mark}
                                 <div class="easel-card-title">${short}</div>
                             </div>
                         </div>
@@ -477,16 +527,10 @@
             popup.openPopup(anchor, "after_start");
         },
 
+        // No name prompt: the new board opens with its heading already selected, so typing names it.
         _createEasel() {
-            let title;
-            try {
-                title = promptText("New easel", "Name this easel:", "Untitled Easel");
-            } catch (e) {
-                console.error("[zen-easel] could not ask for an easel name:", e);
-                return;
-            }
-            if (title === null) return;
-            window.gZenEaselHost?.createEasel(title.trim() || "Untitled Easel")
+            window.gZenEaselHost?.createEasel("Untitled Easel")
+                .then(() => document.querySelector("zen-library-easels-section")?.library?.constructor.toggle())
                 .catch(e => console.error("[zen-easel] could not create easel:", e));
         },
 
@@ -510,24 +554,45 @@
             popup.openPopupAtScreen(event.screenX, event.screenY, true);
         },
 
+        // Renames in place on the tile, like a note. Falls back to a prompt if the library is not on screen.
         rename(board) {
-            let title;
-            try {
-                title = promptText("Rename easel", "New name:", board.title || "Untitled Easel");
-            } catch (e) {
-                console.error("[zen-easel] could not ask for an easel name:", e);
+            const section = document.querySelector("zen-library-easels-section");
+            if (!section?.isConnected) {
+                let title;
+                try { title = promptText("Rename easel", "New name:", board.title || "Untitled Easel"); }
+                catch (e) { console.error("[zen-easel] could not ask for an easel name:", e); return; }
+                this._finishRename(board, title, true);
                 return;
             }
-            const trimmed = title?.trim();
+            this._renamingId = board.id;
+            section.requestUpdate();
+            Promise.resolve(section.updateComplete).then(() => {
+                const input = section.querySelector(".easel-card-rename");
+                input?.focus();
+                input?.select();
+            });
+        },
+
+        _finishRename(board, value, force = false) {
+            if (!force && this._renamingId !== board.id) return; // already finished (Enter then blur)
+            this._renamingId = null;
+            const trimmed = value == null ? "" : String(value).trim();
+            document.querySelector("zen-library-easels-section")?.requestUpdate();
             if (!trimmed || trimmed === board.title) return;
             window.gZenEaselHost?.renameBoard(board.id, trimmed)
                 .then(() => this._reloadOpen())
                 .catch(e => console.error("[zen-easel] could not rename easel:", e));
         },
 
+        // The copy opens straight away, like a duplicated note.
         duplicate(board) {
             window.gZenEaselHost?.duplicateBoard(board.id)
-                .then(() => this._reloadOpen())
+                .then(entry => {
+                    this._reloadOpen();
+                    if (!entry) return;
+                    window.gZenEaselHost.openEasel(entry.id);
+                    document.querySelector("zen-library-easels-section")?.library?.constructor.toggle();
+                })
                 .catch(e => console.error("[zen-easel] could not duplicate easel:", e));
         },
 

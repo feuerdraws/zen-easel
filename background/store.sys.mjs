@@ -222,6 +222,15 @@ class EaselStoreImpl {
     // whether or not any easel page is open.
     async listEasels() {
         await this.init();
+        // The library tiles show each board's background, which older index entries never recorded.
+        // Read it from the document once; every later save keeps it current.
+        for (const e of this._index.easels) {
+            if (e.background !== undefined) continue;
+            try {
+                const raw = await this.readDocument(e.id);
+                e.background = (raw && JSON.parse(raw).background) || "theme";
+            } catch (err) { e.background = "theme"; }
+        }
         return this._index.easels
             .map(e => ({
                 id: e.id,
@@ -229,7 +238,8 @@ class EaselStoreImpl {
                 createdAt: e.createdAt || 0,
                 updatedAt: e.updatedAt || 0,
                 lastOpenedAt: e.lastOpenedAt || 0,
-                objectCount: typeof e.objectCount === "number" ? e.objectCount : 0
+                objectCount: typeof e.objectCount === "number" ? e.objectCount : 0,
+                background: typeof e.background === "string" ? e.background : "theme"
             }))
             .sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -324,7 +334,7 @@ class EaselStoreImpl {
         await this.init();
         const now = Date.now();
         const id = uuid();
-        const entry = { id, title, createdAt: now, updatedAt: now, lastOpenedAt: now, objectCount: 0 };
+        const entry = { id, title, createdAt: now, updatedAt: now, lastOpenedAt: now, objectCount: 0, background: "theme" };
 
         const body = {
             version: INDEX_VERSION,
@@ -367,7 +377,11 @@ class EaselStoreImpl {
         const now = Date.now();
         const newId = uuid();
         const base = typeof doc.title === "string" && doc.title ? doc.title : "Untitled Easel";
-        const title = `${base} copy`;
+        // "X copy", then "X copy 2", "X copy 3"... Copying a copy numbers the same family.
+        const stem = base.replace(/ copy(?: \d+)?$/, "");
+        const taken = new Set(this._index.easels.map(e => e.title));
+        let title = `${stem} copy`;
+        for (let n = 2; taken.has(title); n++) title = `${stem} copy ${n}`;
         doc.id = newId; doc.title = title; doc.createdAt = now; doc.updatedAt = now;
         const path = this._easelPath(newId);
         await IOUtils.writeJSON(path, doc, { tmpPath: `${path}.tmp` });
@@ -380,7 +394,7 @@ class EaselStoreImpl {
             if (await IOUtils.exists(thumb)) await IOUtils.copy(thumb, this._thumbPath(newId));
         } catch (e) { }
         const source = this._index.easels.find(e => e.id === id);
-        const entry = { id: newId, title, createdAt: now, updatedAt: now, lastOpenedAt: 0, objectCount: source?.objectCount ?? 0 };
+        const entry = { id: newId, title, createdAt: now, updatedAt: now, lastOpenedAt: 0, objectCount: source?.objectCount ?? 0, background: typeof doc.background === "string" ? doc.background : "theme" };
         this._index.easels.push(entry);
         await this._writeIndex();
         return entry;
@@ -492,7 +506,8 @@ class EaselStoreImpl {
             json,
             title: meta.title,
             updatedAt,
-            objectCount: typeof meta.objectCount === "number" ? meta.objectCount : undefined
+            objectCount: typeof meta.objectCount === "number" ? meta.objectCount : undefined,
+            background: typeof meta.background === "string" ? meta.background : undefined
         });
 
         if (this._index) {
@@ -501,6 +516,7 @@ class EaselStoreImpl {
                 entry.updatedAt = updatedAt;
                 if (meta.title !== undefined) entry.title = meta.title;
                 if (meta.objectCount !== undefined) entry.objectCount = meta.objectCount;
+                if (typeof meta.background === "string") entry.background = meta.background;
             }
         }
 

@@ -572,3 +572,11 @@ zen-library-easels-section .easel-card-new:hover::before {
 
 /* While the shared menu arranger owns a menu, only its own separators are shown. */
 [data-zl-arranged] > menuseparator:not([data-zl-sep]) { display: none !important; }
+
+/* Inline rename on a library tile (same idea as a note's title field). */
+zen-library-easels-section .easel-card-rename {
+  width: 100%; min-width: 0; box-sizing: border-box; margin: 0; padding: 1px 3px;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 4px;
+  background: color-mix(in srgb, currentColor 8%, transparent); color: inherit; outline: none;
+  font: 700 12px/1.2 inherit; letter-spacing: -0.02em;
+}
