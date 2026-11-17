@@ -592,15 +592,28 @@
             const tab = input.closest?.("tab.tabbrowser-tab") || globalThis.gZenVerticalTabsManager?._tabEdited;
             if (!tab || !this._matchEaselTab(tab)) return;
             const id = this._easelIdForTab(tab);
-            const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s*[—-]\s*Easel$/, "").trim();
+            const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s+—\s+Easel$/, "").trim();
             if (!id || !title) return;
             const key = id + "|" + title;
             if (this._easelLastRename === key) return; // Enter is followed by a blur
             this._easelLastRename = key;
             setTimeout(() => { this._easelLastRename = null; }, 500);
-            setTimeout(() => this.renameBoard(id, title)
-                .then(() => window.ZenEaselLibrarySection?._reloadOpen())
-                .catch(e => console.error("[zen-easel] rename:", e)), 0);
+            setTimeout(() => {
+                // Zen has just pinned the typed text as the tab's fixed label. Drop that, so the label goes back
+                // to following the board ("<title> — Easel") in both directions, and set it right now.
+                try { delete tab.zenStaticLabel; } catch (e) { }
+                tab.removeAttribute("zen-has-static-label");
+                const label = `${title} — Easel`;
+                try { gBrowser._setTabLabel(tab, label, { isContentTitle: true }); } catch (e) { tab.setAttribute("label", label); }
+                this.renameBoard(id, title)
+                    .then(() => {
+                        const page = this._pageFor(tab);
+                        page?.element?._syncTabIdentity?.();
+                        page?.element?.canvas?.invalidate?.();
+                        window.ZenEaselLibrarySection?._reloadOpen();
+                    })
+                    .catch(e => console.error("[zen-easel] rename:", e));
+            }, 0);
         }
 
         _uninstallMenusAndKeys() {

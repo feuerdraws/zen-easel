@@ -614,6 +614,8 @@
             await store.rename(id, title);
             element.canvas?.applyTitleToHeading(title);
             element.library?.refresh();
+            // The tab label follows document.title; refresh() above only reaches it when the switcher is open.
+            element._syncTabIdentity?.();
             return !store._frozen && !store.current?.readOnly;
         }
 
