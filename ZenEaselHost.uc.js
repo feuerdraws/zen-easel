@@ -84,8 +84,11 @@
                 [/^tabs on the /, /^quick note$/]
             ],
             newtab: [
-                [/^new tab$/],
-                [/^new easel$/, /^(new|create) note$/]
+            [
+                // First original row, whatever its label is (Zen localizes it late), so ours never land above it.
+                (k, items) => k === items.find(i => !i.hasAttribute("data-zl-easel") && !i.hasAttribute("data-zl-note") && !i.hasAttribute("data-zl-boost"))
+            ],
+            [/^new easel$/, /^(new|create) note$/]
             ]
         };
         const BOOST_ICON_CANDIDATES = [
@@ -153,7 +156,7 @@
             const groups = spec.map(group => {
                 const found = [];
                 for (const re of group) {
-                    const hit = items.find(k => !used.has(k) && re.test(labelOf(k)));
+                    const hit = items.find(k => !used.has(k) && (typeof re === "function" ? re(k, items) : re.test(labelOf(k))));
                     if (hit) { used.add(hit); found.push(hit); }
                 }
                 return found;
@@ -204,6 +207,7 @@
                 };
                 go();
                 setTimeout(go, 0); // after Zen / the other mod have finished their own popupshowing work
+                setTimeout(go, 120);
             },
             restore() {
                 for (const popup of document.querySelectorAll("[data-zl-arranged]")) {
@@ -513,11 +517,59 @@
                 });
             };
             document.addEventListener("popupshowing", this._onZlPopup, false);
+            this._onEaselTabMenu = event => this._easelTabMenu(event);
+            document.addEventListener("popupshowing", this._onEaselTabMenu, false);
+        }
+
+        // Right-clicking an easel tab gets its own short menu, like a note tab:
+        // Rename / Duplicate, Pin, Delete. Everything Zen normally shows is hidden meanwhile.
+        _easelTabMenu(event) {
+            const popup = event.target;
+            if (popup?.id !== "tabContextMenu") return;
+            this._restoreEaselTabMenu?.();
+            const tab = globalThis.TabContextMenu?.contextTab;
+            if (!tab || !this._matchEaselTab(tab)) return;
+            const easelId = this._easelIdForTab(tab);
+            if (!easelId) return;
+            const section = () => window.ZenEaselLibrarySection;
+            const board = async () => {
+                const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+                return (await EaselStore.listEasels()).find(b => b.id === easelId) || { id: easelId, title: "Untitled Easel" };
+            };
+            const keep = new Set(["context_moveTabToGroup", "context_moveTabToSplitView", "context_separateSplitView", "context_reverseSplitView"]);
+            const states = [], added = [];
+            for (const child of popup.children) {
+                states.push([child, child.hidden]);
+                if (!keep.has(child.id)) child.hidden = true;
+            }
+            const item = (label, run) => {
+                const node = document.createXULElement("menuitem");
+                node.setAttribute("label", label);
+                node.addEventListener("command", () => Promise.resolve(run()).catch(e => console.error("[zen-easel] tab menu:", e)));
+                added.push(node); popup.append(node);
+            };
+            const sep = () => { const node = document.createXULElement("menuseparator"); added.push(node); popup.append(node); };
+            item("Rename Easel…", async () => section()?.rename(await board()));
+            item("Duplicate Easel", async () => section()?.duplicate(await board()));
+            sep();
+            item(tab.pinned ? "Unpin Easel" : "Pin Easel", () => tab.pinned ? gBrowser.unpinTab(tab) : gBrowser.pinTab(tab));
+            sep();
+            item("Delete Easel", async () => section()?.remove(await board()));
+            const restore = () => {
+                for (const [node, hidden] of states) node.hidden = hidden;
+                for (const node of added) node.remove();
+                this._restoreEaselTabMenu = null;
+            };
+            this._restoreEaselTabMenu = restore;
+            const hidden = e => { if (e.target !== popup) return; popup.removeEventListener("popuphidden", hidden); restore(); };
+            popup.addEventListener("popuphidden", hidden);
         }
 
         _uninstallMenusAndKeys() {
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
+            if (this._onEaselTabMenu) document.removeEventListener("popupshowing", this._onEaselTabMenu, false);
+            this._restoreEaselTabMenu?.();
             this._onZlKey = this._onZlPopup = null;
             for (const [key, was] of this._zlKeys || []) { if (was === null) key.removeAttribute("disabled"); else key.setAttribute("disabled", was); }
             this._zlKeys?.clear();
