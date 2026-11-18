@@ -1484,6 +1484,28 @@
         // the document in memory, and the next autosave would put the old name
         // back, so every live view is renamed through its own store. Only a
         // board with no page open is rewritten on disk from here.
+        // Library rename, letter by letter: an open copy of the board follows the field.
+        // null puts the saved name back; undefined only forgets it (the real rename follows).
+        previewRename(id, value) {
+            if (value === undefined) { this._libRenameOrig = null; return; }
+            const tabs = [];
+            this._eachEaselView(id, null, hit => tabs.push(hit.tab));
+            const orig = this._libRenameOrig?.id === id ? this._libRenameOrig : null;
+            if (value === null) this._libRenameOrig = null;
+            const title = value === null ? orig?.title : String(value).replace(/\s+/g, " ").trim();
+            if (value === null && title === undefined) return;
+            for (const tab of tabs) {
+                try {
+                    const live = this._pageFor(tab)?.element;
+                    if (!live?.store?._doc || !live.canvas) continue;
+                    if (value !== null && !this._libRenameOrig) this._libRenameOrig = { id, title: live.store._doc.title };
+                    if (title) live.store._doc.title = title; // an empty field empties the heading, the board keeps its name
+                    live.canvas.applyTitleToHeading(title);
+                    live.canvas.repaintNow?.();
+                } catch (e) { console.error("[zen-easel] live library rename:", e); }
+            }
+        }
+
         async renameBoard(id, title) {
             const trimmed = String(title || "").trim();
             if (!id || !trimmed) return;

@@ -493,6 +493,7 @@
                                     ${mark}
                                     <input class="easel-card-rename" type="text" .value=${title} spellcheck="false"
                                         @click=${event => event.stopPropagation()}
+                                        @input=${event => window.gZenEaselHost?.previewRename?.(board.id, event.target.value)}
                                         @keydown=${event => {
                                             event.stopPropagation();
                                             if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); this._finishRename(board, event.target.value); }
@@ -608,7 +609,10 @@
             this._renamingId = null;
             const trimmed = value == null ? "" : String(value).trim();
             document.querySelector("zen-library-easels-section")?.requestUpdate();
-            if (!trimmed || trimmed === board.title) return;
+            const commit = !!trimmed && trimmed !== board.title;
+            // Cancelled, empty or unchanged: an open copy goes back to its name. Otherwise the rename below settles it.
+            window.gZenEaselHost?.previewRename?.(board.id, commit ? undefined : null);
+            if (!commit) return;
             window.gZenEaselHost?.renameBoard(board.id, trimmed)
                 .then(() => this._reloadOpen())
                 .catch(e => console.error("[zen-easel] could not rename easel:", e));
