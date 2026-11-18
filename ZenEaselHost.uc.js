@@ -578,8 +578,12 @@
             const states = [], added = [];
             for (const child of popup.children) {
                 states.push([child, child.hidden]);
-                if (!keep.has(child.id)) child.hidden = true;
+                // Zen's split-view rows ("Split Out Tab", …) only show on split tabs; leave them as Zen has them.
+                const splitRow = !child.hidden && /split/i.test(`${child.id || ""} ${child.getAttribute?.("label") || ""}`);
+                if (!keep.has(child.id) && !splitRow) child.hidden = true;
             }
+            const nativeUnload = [...popup.querySelectorAll("menuitem")].find(node =>
+                /unload tab/i.test(node.getAttribute("label") || node.label || "") || /unload/i.test(node.id || ""));
             const item = (label, run) => {
                 const node = document.createXULElement("menuitem");
                 node.setAttribute("label", label);
@@ -601,6 +605,7 @@
             item("Duplicate Easel", async () => section()?.duplicate(await board()));
             sep();
             item(tab.pinned ? "Unpin Easel" : "Pin Easel", () => tab.pinned ? gBrowser.unpinTab(tab) : gBrowser.pinTab(tab));
+            item("Unload Easel", () => nativeUnload ? nativeUnload.doCommand() : gBrowser.explicitUnloadTabs?.([tab]));
             sep();
             item("Delete Easel", async () => section()?.remove(await board()));
             const restore = () => {
