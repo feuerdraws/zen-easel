@@ -611,11 +611,16 @@
             const element = this.element;
             const store = element?.store;
             if (!store || store.current?.id !== id) return false;
-            await store.rename(id, title);
-            element.canvas?.applyTitleToHeading(title);
-            element.library?.refresh();
-            // The tab label follows document.title; refresh() above only reaches it when the switcher is open.
-            element._syncTabIdentity?.();
+            // Paint the new name first so nothing slower (disk, index) can keep it off the board.
+            try {
+                if (store._doc) store._doc.title = title;
+                element.canvas?.applyTitleToHeading(title);
+                element.canvas?.invalidate?.();
+                element._syncTabIdentity?.();
+            } catch (e) { console.error("[zen-easel] live rename:", e); }
+            try { await store.rename(id, title); }
+            catch (e) { console.error("[zen-easel] rename store:", e); }
+            try { element.library?.refresh(); element._syncTabIdentity?.(); } catch (e) {}
             return !store._frozen && !store.current?.readOnly;
         }
 

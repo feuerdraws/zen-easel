@@ -605,6 +605,15 @@
                 tab.removeAttribute("zen-has-static-label");
                 const label = `${title} — Easel`;
                 try { gBrowser._setTabLabel(tab, label, { isContentTitle: true }); } catch (e) { tab.setAttribute("label", label); }
+                // Paint the heading straight away on the tab that was renamed, whatever the lookup below finds.
+                try {
+                    const live = this._pageFor(tab)?.element;
+                    if (live?.store?.current?.id === id) {
+                        live.store._doc.title = title;
+                        live.canvas?.applyTitleToHeading(title);
+                        live.canvas?.invalidate?.();
+                    }
+                } catch (e) { console.error("[zen-easel] live heading:", e); }
                 this.renameBoard(id, title)
                     .then(() => {
                         const page = this._pageFor(tab);
