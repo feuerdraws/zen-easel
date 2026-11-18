@@ -605,16 +605,20 @@
                 tab.removeAttribute("zen-has-static-label");
                 const label = `${title} — Easel`;
                 try { gBrowser._setTabLabel(tab, label, { isContentTitle: true }); } catch (e) { tab.setAttribute("label", label); }
-                // Paint the heading straight away on the tab that was renamed, whatever the lookup below finds.
+                // Paint the heading straight away on the tab that was renamed. The page's own id is used, so a
+                // different way of naming the board in the tab can't make the lookup miss.
+                let pageId = id;
                 try {
                     const live = this._pageFor(tab)?.element;
-                    if (live?.store?.current?.id === id) {
+                    console.log("[zen-easel] sidebar rename", { id, pageId: live?.store?.current?.id, hasCanvas: !!live?.canvas, heading: !!live?.canvas?.titleObject });
+                    if (live?.store?.current) {
+                        pageId = live.store.current.id;
                         live.store._doc.title = title;
                         live.canvas?.applyTitleToHeading(title);
                         live.canvas?.invalidate?.();
                     }
                 } catch (e) { console.error("[zen-easel] live heading:", e); }
-                this.renameBoard(id, title)
+                this.renameBoard(pageId, title)
                     .then(() => {
                         const page = this._pageFor(tab);
                         page?.element?._syncTabIdentity?.();
