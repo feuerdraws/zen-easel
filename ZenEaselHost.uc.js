@@ -517,9 +517,34 @@
                 });
             };
             document.addEventListener("popupshowing", this._onZlPopup, false);
+            // Letter by letter, like the other direction: the board heading follows the sidebar field as it is typed.
+            this._onEaselRenameInput = event => {
+                const input = event.target;
+                if (input?.id !== "tab-label-input") return;
+                const tab = input.closest?.("tab.tabbrowser-tab") || globalThis.gZenVerticalTabsManager?._tabEdited;
+                if (!tab || !this._matchEaselTab(tab)) return;
+                const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s+—\s+Easel$/, "").trim();
+                const live = this._pageFor(tab)?.element;
+                if (!title || !live?.store?._doc || !live.canvas) return;
+                if (!this._easelRenameOrig || this._easelRenameOrig.tab !== tab) this._easelRenameOrig = { tab, title: live.store._doc.title };
+                try {
+                    live.store._doc.title = title;
+                    live.canvas.applyTitleToHeading(title);
+                    live.canvas.repaintNow?.();
+                } catch (e) { console.error("[zen-easel] live typing:", e); }
+            };
+            document.addEventListener("input", this._onEaselRenameInput, true);
             this._onEaselRenameKey = event => {
                 if (event.target?.id !== "tab-label-input") return;
-                if (event.key === "Escape") { this._easelCancelled = event.target; return; }
+                if (event.key === "Escape") {
+                    this._easelCancelled = event.target;
+                    const orig = this._easelRenameOrig; this._easelRenameOrig = null;
+                    try {
+                        const live = orig && this._pageFor(orig.tab)?.element;
+                        if (live?.canvas) { live.store._doc.title = orig.title; live.canvas.applyTitleToHeading(orig.title); live.canvas.repaintNow?.(); }
+                    } catch (e) { console.error("[zen-easel] revert:", e); }
+                    return;
+                }
                 if (event.key === "Enter" && !event.isComposing) this._commitEaselRename(event.target);
             };
             window.addEventListener("keydown", this._onEaselRenameKey, true);
@@ -593,6 +618,7 @@
             if (!tab || !this._matchEaselTab(tab)) return;
             const id = this._easelIdForTab(tab);
             const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s+—\s+Easel$/, "").trim();
+            this._easelRenameOrig = null;
             if (!id || !title) return;
             const key = id + "|" + title;
             if (this._easelLastRename === key) return; // Enter is followed by a blur
@@ -636,6 +662,7 @@
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
             if (this._onEaselTabMenu) document.removeEventListener("popupshowing", this._onEaselTabMenu, false);
+            if (this._onEaselRenameInput) document.removeEventListener("input", this._onEaselRenameInput, true);
             if (this._onEaselRenameKey) window.removeEventListener("keydown", this._onEaselRenameKey, true);
             if (this._onEaselRenameBlur) document.removeEventListener("focusout", this._onEaselRenameBlur, true);
             this._restoreEaselTabMenu?.();
