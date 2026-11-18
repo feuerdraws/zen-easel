@@ -615,7 +615,7 @@
             try {
                 if (store._doc) store._doc.title = title;
                 element.canvas?.applyTitleToHeading(title);
-                element.canvas?.invalidate?.();
+                element.canvas?.repaintNow?.();
                 element._syncTabIdentity?.();
             } catch (e) { console.error("[zen-easel] live rename:", e); }
             try { await store.rename(id, title); }

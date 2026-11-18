@@ -615,7 +615,10 @@
                         pageId = live.store.current.id;
                         live.store._doc.title = title;
                         live.canvas?.applyTitleToHeading(title);
-                        live.canvas?.invalidate?.();
+                        live.canvas?.repaintNow?.();
+                        for (const ms of [50, 600, 2500]) setTimeout(() => {
+                            try { console.log("[zen-easel] heading after", ms, "ms:", live.canvas?.titleObject?.text?.content, "| doc.title:", live.canvas?.doc?.title, "| same doc:", live.canvas?.doc === live.store?._doc); } catch (e) { }
+                        }, ms);
                     }
                 } catch (e) { console.error("[zen-easel] live heading:", e); }
                 this.renameBoard(pageId, title)
