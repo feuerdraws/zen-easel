@@ -403,23 +403,32 @@
                 : null;
 
             window.__zlSchemeWatch?.apply();
-            const entries = [];
+            const entries = [], folders = new Map(); // folders: subfolder name -> note entries
             for (const board of shown || []) {
                 entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: n => this._card(html, board, n) });
             }
             if (notes) {
                 try {
                     for (const item of notes.items(query)) {
-                        entries.push({ key: item.key, updatedAt: item.updatedAt || 0, tpl: n => { const c = item.node.querySelector?.(".zn-note-count"); if (c) c.textContent = String(n); return html`${item.node}`; } });
+                        const entry = { key: item.key, updatedAt: item.updatedAt || 0, tpl: n => { const c = item.node.querySelector?.(".zn-note-count"); if (c) c.textContent = String(n); return html`${item.node}`; } };
+                        if (item.folder) { if (!folders.has(item.folder)) folders.set(item.folder, []); folders.get(item.folder).push(entry); }
+                        else entries.push(entry);
                     }
                 } catch (e) { console.error("[zen-easel] could not list notes:", e); }
             }
             entries.sort((a, b) => b.updatedAt - a.updatedAt);
+            // Main folder first, then each subfolder alphabetically with its own heading, line and numbering.
+            const folderBlocks = [...folders].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base", numeric: true }))
+                .map(([name, list]) => html`
+                    <div class="zl-folder-head"><span>${name}</span></div>
+                    <div class="easel-card-grid">
+                        ${repeat(list.sort((a, b) => b.updatedAt - a.updatedAt), entry => entry.key, (entry, i) => entry.tpl(list.length - i))}
+                    </div>`);
 
             const noun = notes ? "easels or notes" : "easels";
             const empty = shown == null
                 ? html`<div class="zen-library-empty">Loading…</div>`
-                : entries.length
+                : entries.length || folders.size
                     ? null
                     : html`
                         <div class="zen-library-empty easel-card-empty">
@@ -441,6 +450,7 @@
                         ? repeat(entries, entry => entry.key, (entry, i) => entry.tpl(entries.length - i))
                         : empty}
                 </div>
+                ${folderBlocks}
                 ${footer}
             `;
         },
