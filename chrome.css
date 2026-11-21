@@ -585,3 +585,7 @@ zen-library-easels-section .easel-card-rename {
 .zl-folder-head { display: flex; align-items: center; gap: 8px; margin: 16px 6px 8px; font: 600 11px system-ui; color: color-mix(in srgb, currentColor 60%, transparent); }
 .zl-folder-head span { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zl-folder-head::after { content: ""; flex: 1; height: 1px; background: color-mix(in srgb, currentColor 20%, transparent); }
+
+/* Icon picked with "Change Icon…": emoji as is, Zen's own icons painted in the same space accent as the squiggle. */
+zen-library-easels-section .easel-card-emoji { display: block; font-size: 16px; line-height: 18px; text-align: center; }
+zen-library-easels-section .easel-card-icon { display: block; width: 100%; height: 100%; background: currentColor; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }

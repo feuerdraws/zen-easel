@@ -67,6 +67,87 @@
     const BOARD_ICON = BASE + "resources/zen-easel-board.svg";
     // Sidebar "+" menu, sidebar context menu and "+ New Tab" context menu arranger. Same snippet
     // lives in Zen Easel and Zen Notes; it is idempotent, so whichever mod runs last leaves the same order.
+  // Tab context menu for note and easel tabs. Same snippet lives in Zen Easel and Zen Notes.
+  // It hides Zen's rows, then puts back the native ones it wants (and the mod's own rows) in a fixed order.
+  const ZLTabMenu = (() => {
+    const KINDS = [
+      ["folder", /^move to folder/i, /moveTabToGroup/],
+      ["reload", /^reload tab/i, /reloadTab/],
+      ["essentials", /essentials/i, /essentials/i],
+      ["icon", /^change icon/i, /change.?icon|tab.?icon/i],
+      ["pin", /^(?:un)?pin tab/i, /^context_(?:un)?pinTab$/],
+      ["moveTab", /^move tab$/i, /moveTabOptions/],
+      ["container", /new container tab/i, /container/i],
+      ["selectAll", /^select all tabs/i, /selectAll/i],
+      ["close", /^close tab$/i, /^context_closeTab$/],
+      ["closeMultiple", /close multiple tabs/i, /closeTabOptions/],
+      ["reopen", /reopen closed tab/i, /undoCloseTab/],
+    ];
+    const labelOf = node => node.getAttribute?.("label") || node.label || "";
+    const kindOf = node => { for (const [kind, byLabel, byId] of KINDS) if (byLabel.test(labelOf(node)) || byId.test(node.id || "")) return kind; return null; };
+    return {
+      // order(found) returns the final list: a native kind ("folder"), "splits", "sep", or a node the mod made.
+      arrange(popup, order) {
+        const original = [...popup.children];
+        const states = original.map(node => [node, node.hidden, node.getAttribute?.("label")]);
+        const found = {}, splits = [];
+        for (const node of original) {
+          if (node.hidden) continue;
+          const kind = kindOf(node);
+          if (kind && !found[kind]) found[kind] = node;
+          else if (/split/i.test(`${node.id || ""} ${labelOf(node)}`)) splits.push(node);
+        }
+        for (const node of original) node.hidden = true;
+        const list = [];
+        for (const entry of order(found)) {
+          if (entry === "sep") list.push("sep");
+          else if (entry === "splits") list.push(...splits);
+          else if (typeof entry === "string") { if (found[entry]) list.push(found[entry]); }
+          else if (entry) list.push(entry);
+        }
+        const tidy = [];
+        for (const entry of list) { if (entry === "sep" && (!tidy.length || tidy.at(-1) === "sep")) continue; tidy.push(entry); }
+        if (tidy.at(-1) === "sep") tidy.pop();
+        const known = new Set(original), added = [];
+        for (const entry of tidy) {
+          const node = entry === "sep" ? document.createXULElement("menuseparator") : entry;
+          node.hidden = false;
+          if (!known.has(node)) added.push(node);
+          popup.append(node);
+        }
+        return () => {
+          for (const node of added) node.remove();
+          for (const [node, hidden, label] of states) {
+            node.hidden = hidden;
+            if (label != null && node.getAttribute("label") !== label) node.setAttribute("label", label);
+          }
+          for (const node of original) popup.append(node); // Zen's own order
+        };
+      },
+      // Zen's "Change Icon…" picker has no callback here, so the tab is watched until its icon changes.
+      watchIcon(tab, onChange) {
+        const read = () => JSON.stringify([tab.zenStaticIcon ?? tab.getAttribute("zen-icon") ?? null, tab.hasAttribute("zen-has-static-icon")]);
+        const before = read();
+        let ticks = 0;
+        const timer = setInterval(() => {
+          if (read() !== before) {
+            clearInterval(timer);
+            const value = tab.zenStaticIcon ?? tab.getAttribute("zen-icon") ?? (tab.hasAttribute("zen-has-static-icon") ? tab.getAttribute("image") : null);
+            console.log("[Zen Notes/Easel] tab icon changed:", value);
+            onChange(value || null);
+          } else if (++ticks > 300) clearInterval(timer);
+        }, 400);
+      },
+      // "😀" -> { emoji }, "chrome://…/book.svg" -> { src }
+      parseIcon(value) {
+        if (!value) return null;
+        const text = String(value).trim();
+        if (/^(?:chrome|resource|data|https?|moz-icon|page-icon):|\.svg(?:[?#].*)?$/i.test(text)) return { src: text };
+        return text ? { emoji: [...text].slice(0, 4).join("") } : null;
+      },
+    };
+  })();
+
     const ZLMenus = (() => {
         const PLUS_ID = "zenCreateNewPopup", SIDE_IDS = ["toolbar-context-menu", "zen-sidebar-context-menu"];
         const SPECS = {
@@ -574,45 +655,43 @@
                 const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
                 return (await EaselStore.listEasels()).find(b => b.id === easelId) || { id: easelId, title: "Untitled Easel" };
             };
-            const keep = new Set(["context_moveTabToGroup", "context_moveTabToSplitView", "context_separateSplitView", "context_reverseSplitView"]);
-            const states = [], added = [];
-            for (const child of popup.children) {
-                states.push([child, child.hidden]);
-                // Zen's split-view rows ("Split Out Tab", …) only show on split tabs; leave them as Zen has them.
-                const splitRow = !child.hidden && /split/i.test(`${child.id || ""} ${child.getAttribute?.("label") || ""}`);
-                if (!keep.has(child.id) && !splitRow) child.hidden = true;
-            }
-            const nativeUnload = [...popup.querySelectorAll("menuitem")].find(node =>
-                /unload tab/i.test(node.getAttribute("label") || node.label || "") || /unload/i.test(node.id || ""));
             const item = (label, run) => {
                 const node = document.createXULElement("menuitem");
                 node.setAttribute("label", label);
                 node.addEventListener("command", () => Promise.resolve(run()).catch(e => console.error("[zen-easel] tab menu:", e)));
-                added.push(node); popup.append(node);
+                return node;
             };
-            const sep = () => { const node = document.createXULElement("menuseparator"); added.push(node); popup.append(node); };
-            // Zen's own "Change label…" row, found before the menu is trimmed down. Running it starts the
-            // normal inline tab rename; the key/blur hooks below copy the result into the board's title.
+            const nativeUnload = [...popup.querySelectorAll("menuitem")].find(node =>
+                /unload tab/i.test(node.getAttribute("label") || node.label || "") || /unload/i.test(node.id || ""));
+            // Zen's own "Change label…" row. Running it starts the normal inline tab rename; the key/blur hooks
+            // copy the result into the board's title.
             const native = [...popup.querySelectorAll("menuitem")].find(node =>
                 /change label|edit label|rename/i.test(node.getAttribute("label") || node.label || "")
                 || /edit-tab|rename-tab|change-label|edit-label/i.test(node.id || ""));
-            item("Change Label…", () => {
-                if (native) { native.doCommand(); return; }
-                const manager = globalThis.gZenVerticalTabsManager;
-                if (manager?.renameTabStart) manager.renameTabStart({ target: tab, type: "command", stopPropagation() {}, preventDefault() {} });
-                else section()?.rename({ id: easelId, title: "Untitled Easel" });
+            const arranged = ZLTabMenu.arrange(popup, found => {
+                if (found.reload) found.reload.setAttribute("label", "Reload Easel");
+                return [
+                    "folder", "splits", "sep",
+                    "reload", "essentials", "sep",
+                    item("Change Label…", () => {
+                        if (native) { native.doCommand(); return; }
+                        const manager = globalThis.gZenVerticalTabsManager;
+                        if (manager?.renameTabStart) manager.renameTabStart({ target: tab, type: "command", stopPropagation() {}, preventDefault() {} });
+                        else section()?.rename({ id: easelId, title: "Untitled Easel" });
+                    }),
+                    found.icon ? item("Change Icon…", () => {
+                        found.icon.doCommand();
+                        ZLTabMenu.watchIcon(tab, value => this.setBoardIcon(easelId, value));
+                    }) : null,
+                    "sep", "pin",
+                    item("Unload Easel", () => nativeUnload ? nativeUnload.doCommand() : gBrowser.explicitUnloadTabs?.([tab])),
+                    item("Duplicate Easel", async () => section()?.duplicate(await board())),
+                    "sep", "moveTab", "container", "selectAll",
+                    "sep", "close", "closeMultiple", "reopen",
+                    "sep", item("Delete Easel", async () => section()?.remove(await board())),
+                ];
             });
-            item("Duplicate Easel", async () => section()?.duplicate(await board()));
-            sep();
-            item(tab.pinned ? "Unpin Easel" : "Pin Easel", () => tab.pinned ? gBrowser.unpinTab(tab) : gBrowser.pinTab(tab));
-            item("Unload Easel", () => nativeUnload ? nativeUnload.doCommand() : gBrowser.explicitUnloadTabs?.([tab]));
-            sep();
-            item("Delete Easel", async () => section()?.remove(await board()));
-            const restore = () => {
-                for (const [node, hidden] of states) node.hidden = hidden;
-                for (const node of added) node.remove();
-                this._restoreEaselTabMenu = null;
-            };
+            const restore = () => { arranged(); this._restoreEaselTabMenu = null; };
             this._restoreEaselTabMenu = restore;
             const hidden = e => { if (e.target !== popup) return; popup.removeEventListener("popuphidden", hidden); restore(); };
             popup.addEventListener("popuphidden", hidden);
@@ -1510,6 +1589,14 @@
                     if (value === null && orig) live.canvas.collapseUndo(orig.undoBase, true);
                 } catch (e) { console.error("[zen-easel] live library rename:", e); }
             }
+        }
+
+        // "Change Icon…" on an easel tab: the pick is kept on the board and shown on its library tile.
+        async setBoardIcon(id, value) {
+            const icon = ZLTabMenu.parseIcon(value);
+            const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            await EaselStore.setIcon(id, icon);
+            window.ZenEaselLibrarySection?._reloadOpen();
         }
 
         async renameBoard(id, title) {

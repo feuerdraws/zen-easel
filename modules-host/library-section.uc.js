@@ -485,7 +485,12 @@
             const chars = [...title];
             const short = chars.length > 20 ? `${chars.slice(0, 20).join("")}…` : title;
             const renaming = this._renamingId === board.id;
-            const mark = html`
+            const icon = board.icon;
+            const mark = icon?.emoji
+                ? html`<div class="easel-card-mark is-emoji"><span class="easel-card-emoji">${icon.emoji}</span></div>`
+                : icon?.src
+                    ? html`<div class="easel-card-mark"><span class="easel-card-icon" style=${`-webkit-mask-image:url("${String(icon.src).replace(/["\\]/g, "")}");mask-image:url("${String(icon.src).replace(/["\\]/g, "")}")`}></span></div>`
+                    : html`
                 <div class="easel-card-mark">
                     <svg class="easel-card-squiggle" viewBox="20 38 76 68" fill="none" aria-hidden="true">
                         <path d="M 79.08 42.08 C 91.19 54.79 88.45 58.62 81.98 56.04 C 75.51 53.47 66.12 44.54 59.62 47.55 C 53.12 50.56 91.47 84.24 77.76 86.61 C 72.57 87.51 43.87 53.27 34.03 56.04 C 23.75 58.94 58.53 84.24 60.64 100.31" stroke="currentColor" stroke-width="7.1" stroke-linecap="round" stroke-linejoin="round"></path>

@@ -239,7 +239,8 @@ class EaselStoreImpl {
                 updatedAt: e.updatedAt || 0,
                 lastOpenedAt: e.lastOpenedAt || 0,
                 objectCount: typeof e.objectCount === "number" ? e.objectCount : 0,
-                background: typeof e.background === "string" ? e.background : "theme"
+                background: typeof e.background === "string" ? e.background : "theme",
+                icon: e.icon && typeof e.icon === "object" ? e.icon : null
             }))
             .sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -398,6 +399,15 @@ class EaselStoreImpl {
         this._index.easels.push(entry);
         await this._writeIndex();
         return entry;
+    }
+
+    async setIcon(id, icon) {
+        await this.init();
+        if (!isSafeId(id)) return;
+        const entry = this._index.easels.find(e => e.id === id);
+        if (!entry) return;
+        if (icon && (typeof icon.emoji === "string" || typeof icon.src === "string")) entry.icon = icon; else delete entry.icon;
+        await this._writeIndex();
     }
 
     async renameEasel(id, title) {
