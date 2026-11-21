@@ -1942,6 +1942,18 @@
         // the previous step, and as it is now — because the commands are closures and cannot
         // be asked. retainedAssets() is the union over both stacks: the files an undo or a
         // redo could still bring back, which the store's sweep must not delete.
+        // Typing a title from outside the board (sidebar or library field) makes one undo step per letter.
+        // This folds the steps added since `base` into a single one, or drops them when the rename was cancelled.
+        collapseUndo(base, drop = false) {
+            if (!Number.isInteger(base) || this._undo.length <= base) return;
+            const steps = this._undo.splice(base);
+            if (drop) { this._redo.length = 0; return; }
+            if (steps.length < 2) { this._undo.push(...steps); return; }
+            const assets = new Set();
+            for (const step of steps) for (const asset of step.assets || []) assets.add(asset);
+            this._undo.push({ undo: steps[0].undo, redo: steps[steps.length - 1].redo, assets });
+        }
+
         _push(command) {
             const after = this._docAssets();
             command.assets = new Set([...this._assetSnapshot, ...after]);

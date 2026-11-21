@@ -526,7 +526,7 @@
                 const title = String(input.value || "").replace(/\s+/g, " ").trim().replace(/\s+—\s+Easel$/, "").trim();
                 const live = this._pageFor(tab)?.element;
                 if (!live?.store?._doc || !live.canvas) return;
-                if (!this._easelRenameOrig || this._easelRenameOrig.tab !== tab) this._easelRenameOrig = { tab, title: live.store._doc.title };
+                if (!this._easelRenameOrig || this._easelRenameOrig.tab !== tab) this._easelRenameOrig = { tab, title: live.store._doc.title, undoBase: live.canvas._undo?.length };
                 try {
                     // An empty field empties the heading too; the board keeps its last real name meanwhile.
                     if (title) live.store._doc.title = title;
@@ -542,7 +542,7 @@
                     const orig = this._easelRenameOrig; this._easelRenameOrig = null;
                     try {
                         const live = orig && this._pageFor(orig.tab)?.element;
-                        if (live?.canvas) { live.store._doc.title = orig.title; live.canvas.applyTitleToHeading(orig.title); live.canvas.repaintNow?.(); }
+                        if (live?.canvas) { live.store._doc.title = orig.title; live.canvas.applyTitleToHeading(orig.title); live.canvas.repaintNow?.(); live.canvas.collapseUndo(orig.undoBase, true); }
                     } catch (e) { console.error("[zen-easel] revert:", e); }
                     return;
                 }
@@ -628,10 +628,11 @@
             if (!id || !title) { // nothing typed: the board goes back to its name
                 try {
                     const live = orig && this._pageFor(orig.tab)?.element;
-                    if (live?.canvas) { live.store._doc.title = orig.title; live.canvas.applyTitleToHeading(orig.title); live.canvas.repaintNow?.(); }
+                    if (live?.canvas) { live.store._doc.title = orig.title; live.canvas.applyTitleToHeading(orig.title); live.canvas.repaintNow?.(); live.canvas.collapseUndo(orig.undoBase, true); }
                 } catch (e) { console.error("[zen-easel] revert:", e); }
                 return;
             }
+            try { if (orig) this._pageFor(orig.tab)?.element?.canvas?.collapseUndo(orig.undoBase); } catch (e) { console.error("[zen-easel] undo:", e); }
             const key = id + "|" + title;
             if (this._easelLastRename === key) return; // Enter is followed by a blur
             this._easelLastRename = key;
@@ -1487,7 +1488,11 @@
         // Library rename, letter by letter: an open copy of the board follows the field.
         // null puts the saved name back; undefined only forgets it (the real rename follows).
         previewRename(id, value) {
-            if (value === undefined) { this._libRenameOrig = null; return; }
+            if (value === undefined) { // confirmed: the letters typed so far become a single undo step
+                const kept = this._libRenameOrig; this._libRenameOrig = null;
+                try { if (kept?.id === id) this._eachEaselView(id, null, hit => this._pageFor(hit.tab)?.element?.canvas?.collapseUndo(kept.undoBase)); } catch (e) { console.error("[zen-easel] undo:", e); }
+                return;
+            }
             const tabs = [];
             this._eachEaselView(id, null, hit => tabs.push(hit.tab));
             const orig = this._libRenameOrig?.id === id ? this._libRenameOrig : null;
@@ -1498,10 +1503,11 @@
                 try {
                     const live = this._pageFor(tab)?.element;
                     if (!live?.store?._doc || !live.canvas) continue;
-                    if (value !== null && !this._libRenameOrig) this._libRenameOrig = { id, title: live.store._doc.title };
+                    if (value !== null && !this._libRenameOrig) this._libRenameOrig = { id, title: live.store._doc.title, undoBase: live.canvas._undo?.length };
                     if (title) live.store._doc.title = title; // an empty field empties the heading, the board keeps its name
                     live.canvas.applyTitleToHeading(title);
                     live.canvas.repaintNow?.();
+                    if (value === null && orig) live.canvas.collapseUndo(orig.undoBase, true);
                 } catch (e) { console.error("[zen-easel] live library rename:", e); }
             }
         }
