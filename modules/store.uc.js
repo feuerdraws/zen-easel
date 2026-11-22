@@ -130,7 +130,13 @@
             return this._easels || [];
         }
 
+        // An easel page belongs to the container of its tab; the store lists and creates in that container's folder.
+        _useContainer() {
+            try { EaselStore.useContainer(window.browsingContext?.originAttributes?.userContextId ?? 0); } catch (e) { }
+        }
+
         async refreshList() {
+            this._useContainer();
             this._easels = await EaselStore.listEasels();
             return this._easels;
         }
@@ -280,6 +286,7 @@
             await this._letGoOfDocument();
             this._releaseAssets();
 
+            this._useContainer();
             const { entry, json } = await EaselStore.createDocument(title);
             this._doc = this._hydrate(entry.id, JSON.parse(json));
             await this.refreshList();
@@ -549,7 +556,7 @@
             // index is only behind because the debounce has not fired yet.
             if (this._saveTimer) return null;
 
-            const entries = await EaselStore.listEasels();
+            const entries = await EaselStore.listAllEasels();
             const entry = entries.find(e => e.id === this._doc.id);
             if (!entry || !(entry.updatedAt > (this._doc.updatedAt || 0))) return null;
 

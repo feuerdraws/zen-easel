@@ -649,6 +649,12 @@
             document.addEventListener("focusout", this._onEaselRenameBlur, true);
             this._onEaselTabMenu = event => this._easelTabMenu(event);
             document.addEventListener("popupshowing", this._onEaselTabMenu, false);
+            // Each Zen container has its own easels folder: follow the space this window is showing.
+            this._onContainerCheck = () => this._useContainer();
+            gBrowser.tabContainer.addEventListener("TabSelect", this._onContainerCheck);
+            window.addEventListener("ZenWorkspaceChanged", this._onContainerCheck);
+            this._useContainer();
+            for (const ms of [1500, 5000]) setTimeout(this._onContainerCheck, ms);
         }
 
         // Right-clicking an easel tab gets its own short menu, like a note tab:
@@ -664,7 +670,7 @@
             const section = () => window.ZenEaselLibrarySection;
             const board = async () => {
                 const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
-                return (await EaselStore.listEasels()).find(b => b.id === easelId) || { id: easelId, title: "Untitled Easel" };
+                return (await EaselStore.listAllEasels()).find(b => b.id === easelId) || { id: easelId, title: "Untitled Easel" };
             };
             const item = (label, run) => {
                 const node = document.createXULElement("menuitem");
@@ -765,6 +771,7 @@
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
             if (this._onEaselTabMenu) document.removeEventListener("popupshowing", this._onEaselTabMenu, false);
+            if (this._onContainerCheck) { gBrowser.tabContainer.removeEventListener("TabSelect", this._onContainerCheck); window.removeEventListener("ZenWorkspaceChanged", this._onContainerCheck); this._onContainerCheck = null; }
             if (this._onEaselRenameInput) document.removeEventListener("input", this._onEaselRenameInput, true);
             if (this._onEaselRenameKey) window.removeEventListener("keydown", this._onEaselRenameKey, true);
             if (this._onEaselRenameBlur) document.removeEventListener("focusout", this._onEaselRenameBlur, true);
@@ -1557,7 +1564,7 @@
                 const id = easelId || this._easelIdForTab(tab);
                 if (!id) return;
                 const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
-                const icon = (await EaselStore.listEasels()).find(b => b.id === id)?.icon;
+                const icon = (await EaselStore.listAllEasels()).find(b => b.id === id)?.icon;
                 if (!icon) return;
                 const src = icon.emoji
                     ? "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text x="16" y="25" font-size="24" text-anchor="middle">${icon.emoji.replace(/[<>&]/g, "")}</text></svg>`)
@@ -1580,9 +1587,25 @@
         // page to do it, because that works in all three states without special-casing any
         // of them: no easel tab open, one open showing a different board, or one open
         // showing this one. By the time openEasel runs, the id names a file that exists.
+        // The container of the space this window is showing (0 = no container).
+        _containerId() {
+            try {
+                const id = globalThis.gZenWorkspaces?.getActiveWorkspace?.()?.containerTabId;
+                return Number.isFinite(Number(id)) ? Number(id) : 0;
+            } catch (e) { return 0; }
+        }
+
+        _useContainer() {
+            try {
+                const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+                EaselStore.useContainer(this._containerId());
+            } catch (e) { console.error("[zen-easel] container:", e); }
+        }
+
         async createEasel(title = "Untitled Easel") {
             const { EaselStore } =
                 ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            this._useContainer();
 
             // The document exists on disk before the tab is asked for, so the tab opens
             // straight onto it — there is no switch to start and nothing to await.
@@ -1658,6 +1681,7 @@
             if (!id) return null;
             const { EaselStore } =
                 ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            this._useContainer();
             return EaselStore.duplicateEasel(id);
         }
 
@@ -1762,6 +1786,7 @@
             if (target === "new") {
                 const { EaselStore } =
                     ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+                this._useContainer();
                 const { entry } = await EaselStore.createDocument("Untitled Easel");
                 return this._openEaselForCapture(entry.id, capture);
             }

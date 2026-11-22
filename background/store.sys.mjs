@@ -78,9 +78,10 @@ function retitleDocument(doc, title, now) {
 
 class EaselStoreImpl {
     constructor() {
-        this._root = null;
-        this._index = null;
-        this._initPromise = null;
+        // One folder (and one index.json) per Zen container. A context is one folder; containers pointed at the
+        // same folder share one. The active one is what lists and new easels use; the others stay readable by id.
+        this._ctxs = new Map();
+        this._active = this._ctxFor(0);
 
         // id -> { json, title, updatedAt }. One pending write per easel, latest wins:
         // an easel saved three times inside the debounce window is written once.
@@ -99,11 +100,66 @@ class EaselStoreImpl {
 
     /* ---------------------------------------------------------------- paths */
 
-    get root() {
-        if (this._root) return this._root;
-        const configured = prefStr("zen.easel.storage-dir", "").trim();
-        this._root = configured || PathUtils.join(PathUtils.profileDir, "zen-easels");
-        return this._root;
+    get root() { return this._active.root; }
+    get _index() { return this._active.index; }
+    set _index(value) { this._active.index = value; }
+
+    _containerDirs() {
+        try { return JSON.parse(prefStr("zen.easel.container-dirs", "{}")) || {}; } catch (e) { return {}; }
+    }
+
+    _containerRoot(containerId) {
+        const key = String(containerId || 0);
+        if (key === "0") {
+            const configured = prefStr("zen.easel.storage-dir", "").trim();
+            return configured || PathUtils.join(PathUtils.profileDir, "zen-easels");
+        }
+        return this._containerDirs()[key] || PathUtils.join(PathUtils.profileDir, "zen-easels-containers", key);
+    }
+
+    _rootKey(root) { return String(root).replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase(); }
+
+    _ctxFor(containerId) {
+        const root = this._containerRoot(containerId), key = this._rootKey(root);
+        let ctx = this._ctxs.get(key);
+        if (!ctx) { ctx = { root, index: null, initPromise: null }; this._ctxs.set(key, ctx); }
+        return ctx;
+    }
+
+    allContainerIds() {
+        const ids = new Set([0]);
+        try {
+            const { ContextualIdentityService } = ChromeUtils.importESModule("resource://gre/modules/ContextualIdentityService.sys.mjs");
+            for (const identity of ContextualIdentityService.getPublicIdentities()) ids.add(identity.userContextId);
+        } catch (e) { }
+        return [...ids];
+    }
+
+    // Which container new easels and lists belong to. Each window says so for its current space.
+    useContainer(containerId) {
+        this._active = this._ctxFor(Number.isFinite(Number(containerId)) ? Number(containerId) : 0);
+    }
+
+    // The folder an easel's files live in: that of the container whose index lists it (the active one if none).
+    _ctxOf(id) {
+        for (const ctx of this._ctxs.values()) if (ctx.index?.easels.some(e => e.id === id)) return ctx;
+        return this._active;
+    }
+
+    _rootOf(id) { return this._ctxOf(id).root; }
+
+    _entryOf(id) {
+        for (const ctx of this._ctxs.values()) { const entry = ctx.index?.easels.find(e => e.id === id); if (entry) return entry; }
+        return undefined;
+    }
+
+    async _peekOthers() {
+        for (const containerId of this.allContainerIds()) {
+            const ctx = this._ctxFor(containerId);
+            if (ctx === this._active || ctx.index || ctx.initPromise) continue;
+            try { if (await IOUtils.exists(this._indexPath(ctx))) ctx.index = await this._readIndexFile(ctx); }
+            catch (e) { console.error("[zen-easel] could not read another container's index:", e); }
+        }
     }
 
     // Every path built from a caller-supplied string is validated at the point of
@@ -112,17 +168,17 @@ class EaselStoreImpl {
     // PathUtils.join offers no traversal guarantee worth leaning on.
     _easelPath(id) {
         if (!isSafeId(id)) throw new Error(`unsafe easel id: ${id}`);
-        return PathUtils.join(this.root, "easels", `${id}.json`);
+        return PathUtils.join(this._rootOf(id), "easels", `${id}.json`);
     }
 
     _thumbPath(id) {
         if (!isSafeId(id)) throw new Error(`unsafe easel id: ${id}`);
-        return PathUtils.join(this.root, "easels", `${id}.thumb.png`);
+        return PathUtils.join(this._rootOf(id), "easels", `${id}.thumb.png`);
     }
 
     _assetDir(easelId) {
         if (!isSafeId(easelId)) throw new Error(`unsafe easel id: ${easelId}`);
-        return PathUtils.join(this.root, "assets", easelId);
+        return PathUtils.join(this._rootOf(easelId), "assets", easelId);
     }
 
     _assetPath(easelId, name) {
@@ -132,10 +188,10 @@ class EaselStoreImpl {
 
     _trashDir(easelId) {
         if (!isSafeId(easelId)) throw new Error(`unsafe easel id: ${easelId}`);
-        return PathUtils.join(this.root, "trash", easelId);
+        return PathUtils.join(this._rootOf(easelId), "trash", easelId);
     }
 
-    _indexPath() { return PathUtils.join(this.root, "index.json"); }
+    _indexPath(ctx = this._active) { return PathUtils.join(ctx.root, "index.json"); }
 
     /* ----------------------------------------------------------------- init */
 
@@ -148,22 +204,24 @@ class EaselStoreImpl {
     // feature that reads the easel list went permanently dead with no way back but a
     // restart. Clearing it on rejection makes the next caller try again.
     init() {
-        if (this._initPromise) return this._initPromise;
-        this._initPromise = (async () => {
-            await IOUtils.makeDirectory(this.root, { createAncestors: true, ignoreExisting: true });
-            await IOUtils.makeDirectory(PathUtils.join(this.root, "easels"), { createAncestors: true, ignoreExisting: true });
-            await IOUtils.makeDirectory(PathUtils.join(this.root, "assets"), { createAncestors: true, ignoreExisting: true });
+        const ctx = this._active;
+        if (ctx.initPromise) return ctx.initPromise;
+        ctx.initPromise = (async () => {
+            await IOUtils.makeDirectory(ctx.root, { createAncestors: true, ignoreExisting: true });
+            await IOUtils.makeDirectory(PathUtils.join(ctx.root, "easels"), { createAncestors: true, ignoreExisting: true });
+            await IOUtils.makeDirectory(PathUtils.join(ctx.root, "assets"), { createAncestors: true, ignoreExisting: true });
 
             // Undo history does not outlive a process, so trash left by the last one — a quit,
             // a crash, a window closed with boards open — can never be restored. Nothing in
             // this process can have written any yet: every sweep awaits this first.
             try {
-                await IOUtils.remove(PathUtils.join(this.root, "trash"), { recursive: true, ignoreAbsent: true });
+                await IOUtils.remove(PathUtils.join(ctx.root, "trash"), { recursive: true, ignoreAbsent: true });
             } catch (e) {
                 console.error("[zen-easel] could not empty the previous session's trash:", e);
             }
 
-            this._index = await this._readIndexFile();
+            ctx.index = await this._readIndexFile(ctx);
+            await this._peekOthers();
 
             // One blocker for the process, registered once. The overlay version had to
             // generate a unique name per store instance because opening and closing the
@@ -181,15 +239,15 @@ class EaselStoreImpl {
                 }
             }
         })().catch(e => {
-            this._initPromise = null;
+            ctx.initPromise = null;
             throw e;
         });
-        return this._initPromise;
+        return ctx.initPromise;
     }
 
-    async _readIndexFile() {
+    async _readIndexFile(ctx = this._active) {
         const fallback = { version: INDEX_VERSION, easels: [], lastOpened: null, lastSweep: 0 };
-        const path = this._indexPath();
+        const path = this._indexPath(ctx);
         if (!(await IOUtils.exists(path))) return fallback;
 
         try {
@@ -220,6 +278,16 @@ class EaselStoreImpl {
 
     // Plain data, newest first. This is what zen-library renders from, and it works
     // whether or not any easel page is open.
+    // Every container's easels (id, title, icon…), for finding one by id.
+    async listAllEasels() {
+        await this.init();
+        const all = [];
+        for (const ctx of this._ctxs.values()) {
+            for (const e of ctx.index?.easels || []) all.push({ id: e.id, title: typeof e.title === "string" ? e.title : "Untitled Easel", createdAt: e.createdAt || 0, updatedAt: e.updatedAt || 0, icon: e.icon && typeof e.icon === "object" ? e.icon : null });
+        }
+        return all;
+    }
+
     async listEasels() {
         await this.init();
         // The library tiles show each board's background, which older index entries never recorded.
@@ -257,7 +325,7 @@ class EaselStoreImpl {
     async setLastOpened(id) {
         await this.init();
         if (!isSafeId(id)) return;
-        const entry = this._index.easels.find(e => e.id === id);
+        const entry = this._entryOf(id);
         if (!entry) return;
         // Recency among boards only changes when lastOpened changes (A → B). Stamp
         // lastOpenedAt once on an older entry that predates the field, so a profile
@@ -286,8 +354,11 @@ class EaselStoreImpl {
     }
 
     async _writeIndexNow() {
-        const path = this._indexPath();
-        await IOUtils.writeJSON(path, this._index, { tmpPath: `${path}.tmp` });
+        for (const ctx of this._ctxs.values()) {
+            if (!ctx.index) continue;
+            const path = this._indexPath(ctx);
+            await IOUtils.writeJSON(path, ctx.index, { tmpPath: `${path}.tmp` });
+        }
     }
 
     /* ---------------------------------------------------------- documents */
@@ -321,10 +392,11 @@ class EaselStoreImpl {
     }
 
     async _forgetEasel(id) {
-        const before = this._index.easels.length;
-        this._index.easels = this._index.easels.filter(e => e.id !== id);
-        if (this._index.lastOpened === id) this._index.lastOpened = null;
-        if (before !== this._index.easels.length || this._index.lastOpened === null) {
+        const owner = this._ctxOf(id);
+        const before = owner.index.easels.length;
+        owner.index.easels = owner.index.easels.filter(e => e.id !== id);
+        if (owner.index.lastOpened === id) owner.index.lastOpened = null;
+        if (before !== owner.index.easels.length || owner.index.lastOpened === null) {
             await this._writeIndex();
         }
     }
@@ -394,7 +466,7 @@ class EaselStoreImpl {
             const thumb = this._thumbPath(id);
             if (await IOUtils.exists(thumb)) await IOUtils.copy(thumb, this._thumbPath(newId));
         } catch (e) { }
-        const source = this._index.easels.find(e => e.id === id);
+        const source = this._entryOf(id);
         const entry = { id: newId, title, createdAt: now, updatedAt: now, lastOpenedAt: 0, objectCount: source?.objectCount ?? 0, background: typeof doc.background === "string" ? doc.background : "theme" };
         this._index.easels.push(entry);
         await this._writeIndex();
@@ -404,7 +476,7 @@ class EaselStoreImpl {
     async setIcon(id, icon) {
         await this.init();
         if (!isSafeId(id)) return;
-        const entry = this._index.easels.find(e => e.id === id);
+        const entry = this._entryOf(id);
         if (!entry) return;
         if (icon && (typeof icon.emoji === "string" || typeof icon.src === "string")) entry.icon = icon; else delete entry.icon;
         await this._writeIndex();
@@ -413,7 +485,7 @@ class EaselStoreImpl {
     async renameEasel(id, title) {
         await this.init();
         if (!isSafeId(id)) return;
-        const entry = this._index.easels.find(e => e.id === id);
+        const entry = this._entryOf(id);
         if (entry) entry.title = title;
 
         // A rename while a save is queued must not be overwritten by the older title.
@@ -431,7 +503,7 @@ class EaselStoreImpl {
     async renameClosed(id, title) {
         await this.init();
         if (!isSafeId(id)) return false;
-        const entry = this._index.easels.find(e => e.id === id);
+        const entry = this._entryOf(id);
         if (!entry) return false;
 
         const now = Date.now();
@@ -487,8 +559,9 @@ class EaselStoreImpl {
         // resurrects the file we just removed.
         this._pending.delete(id);
 
-        this._index.easels = this._index.easels.filter(e => e.id !== id);
-        if (this._index.lastOpened === id) this._index.lastOpened = null;
+        const owner = this._ctxOf(id);
+        owner.index.easels = owner.index.easels.filter(e => e.id !== id);
+        if (owner.index.lastOpened === id) owner.index.lastOpened = null;
 
         // Index first: interrupted, that leaves an unreferenced file rather than a card opening onto nothing.
         await this._writeIndex();
@@ -520,8 +593,8 @@ class EaselStoreImpl {
             background: typeof meta.background === "string" ? meta.background : undefined
         });
 
-        if (this._index) {
-            const entry = this._index.easels.find(e => e.id === id);
+        {
+            const entry = this._entryOf(id);
             if (entry) {
                 entry.updatedAt = updatedAt;
                 if (meta.title !== undefined) entry.title = meta.title;

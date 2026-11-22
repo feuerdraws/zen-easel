@@ -382,6 +382,7 @@
             section._boardGen = gen;
             try {
                 const { EaselStore } = ChromeUtils.importESModule(STORE);
+                window.gZenEaselHost?._useContainer?.();
                 const boards = await EaselStore.listEasels();
                 if (section._boardGen !== gen || !section.isConnected) return;
                 section._boards = boards;
