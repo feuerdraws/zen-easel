@@ -594,6 +594,7 @@
             add("Open Easel", () => this.open(board, null));
             add("Rename Easel…", () => this.rename(board));
             add("Duplicate Easel", () => this.duplicate(board));
+            if (board.icon) add("Reset Icon", () => window.gZenEaselHost?.setBoardIcon(board.id, null));
             popup.appendChild(document.createXULElement("menuseparator"));
             add("Delete Easel", () => this.remove(board));
             popup.addEventListener("popuphidden", () => popup.remove(), { once: true });

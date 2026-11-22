@@ -1544,8 +1544,27 @@
             try {
                 gBrowser.setIcon(tab, BOARD_ICON);
             } catch (e) { }
+            this._applyBoardIcon(tab, easelId);
 
             return tab;
+        }
+
+        // A board's chosen icon (Change Icon…) is put back on its tab each time it is opened. The page sets its own
+        // favicon as it loads, so this is repeated a few times. An emoji is drawn as a small SVG for the tab.
+        _applyBoardIcon(tab, easelId) {
+            const run = async () => {
+                if (!tab.isConnected) return;
+                const id = easelId || this._easelIdForTab(tab);
+                if (!id) return;
+                const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+                const icon = (await EaselStore.listEasels()).find(b => b.id === id)?.icon;
+                if (!icon) return;
+                const src = icon.emoji
+                    ? "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text x="16" y="25" font-size="24" text-anchor="middle">${icon.emoji.replace(/[<>&]/g, "")}</text></svg>`)
+                    : icon.src;
+                if (src && tab.getAttribute("image") !== src) gBrowser.setIcon(tab, src);
+            };
+            for (const ms of [150, 700, 1800, 4000]) setTimeout(() => run().catch(e => console.error("[zen-easel] tab icon:", e)), ms);
         }
 
         // Makes a new easel and opens it.
