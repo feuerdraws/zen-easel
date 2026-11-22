@@ -486,10 +486,11 @@
             const short = chars.length > 20 ? `${chars.slice(0, 20).join("")}…` : title;
             const renaming = this._renamingId === board.id;
             const icon = board.icon;
+            const safeSrc = icon?.src ? String(icon.src).replace(/["\\]/g, "") : "";
             const mark = icon?.emoji
                 ? html`<div class="easel-card-mark is-emoji"><span class="easel-card-emoji">${icon.emoji}</span></div>`
                 : icon?.src
-                    ? html`<div class="easel-card-mark"><span class="easel-card-icon" style=${`-webkit-mask-image:url("${String(icon.src).replace(/["\\]/g, "")}");mask-image:url("${String(icon.src).replace(/["\\]/g, "")}")`}></span></div>`
+                    ? html`<div class="easel-card-mark"><span class=${icon.plain ? "easel-card-icon is-plain" : "easel-card-icon"} style=${icon.plain ? `background-image:url("${safeSrc}")` : `-webkit-mask-image:url("${safeSrc}");mask-image:url("${safeSrc}")`}></span></div>`
                     : html`
                 <div class="easel-card-mark">
                     <svg class="easel-card-squiggle" viewBox="20 38 76 68" fill="none" aria-hidden="true">

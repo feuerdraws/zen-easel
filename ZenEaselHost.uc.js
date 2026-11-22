@@ -126,24 +126,35 @@
       },
       // Zen's "Change Icon…" picker has no callback here, so the tab is watched until its icon changes.
       watchIcon(tab, onChange) {
-        const read = () => JSON.stringify([tab.zenStaticIcon ?? tab.getAttribute("zen-icon") ?? null, tab.hasAttribute("zen-has-static-icon")]);
-        const before = read();
+        const emojiText = () => { const node = tab.querySelector?.('[class*="emoji" i]'); return node ? (node.textContent || "").trim() : ""; };
+        const sources = () => ({
+          static: tab.zenStaticIcon ?? null, attr: tab.getAttribute("zen-icon"), flag: tab.hasAttribute("zen-has-static-icon"),
+          emoji: emojiText(), image: tab.getAttribute("image"),
+        });
+        const before = JSON.stringify(sources());
         let ticks = 0;
         const timer = setInterval(() => {
-          if (read() !== before) {
+          const now = sources();
+          if (JSON.stringify(now) !== before) {
             clearInterval(timer);
-            const value = tab.zenStaticIcon ?? tab.getAttribute("zen-icon") ?? (tab.hasAttribute("zen-has-static-icon") ? tab.getAttribute("image") : null);
-            console.log("[Zen Notes/Easel] tab icon changed:", value);
-            onChange(value || null);
+            const value = now.static || now.attr || now.emoji || now.image || null;
+            console.log("[Zen Notes/Easel] tab icon changed:", now);
+            onChange(value);
           } else if (++ticks > 300) clearInterval(timer);
         }, 400);
       },
-      // "😀" -> { emoji }, "chrome://…/book.svg" -> { src }
+      // "😀" -> { emoji }, "chrome://…/book.svg" -> { src }; other images are kept as they are ({ src, plain }).
       parseIcon(value) {
         if (!value) return null;
         const text = String(value).trim();
-        if (/^(?:chrome|resource|data|https?|moz-icon|page-icon):|\.svg(?:[?#].*)?$/i.test(text)) return { src: text };
-        return text ? { emoji: [...text].slice(0, 4).join("") } : null;
+        if (/^data:image\/svg\+xml/i.test(text)) { // an emoji drawn as an SVG
+          let svg = text; try { svg = decodeURIComponent(text.slice(text.indexOf(",") + 1)); } catch {}
+          const glyph = svg.match(/<text[^>]*>([^<]+)<\/text>/i)?.[1]?.trim();
+          if (glyph) return { emoji: [...glyph].slice(0, 4).join("") };
+        }
+        if (/^(?:chrome|resource):|^[^:]*\.svg(?:[?#].*)?$/i.test(text) && !/^data:/i.test(text)) return { src: text };
+        if (/^(?:data|https?|moz-icon|page-icon):/i.test(text)) return { src: text, plain: true };
+        return { emoji: [...text].slice(0, 4).join("") };
       },
     };
   })();
