@@ -655,6 +655,7 @@
             window.addEventListener("ZenWorkspaceChanged", this._onContainerCheck);
             this._useContainer();
             for (const ms of [1500, 5000]) setTimeout(this._onContainerCheck, ms);
+            this._containerPoll = setInterval(this._onContainerCheck, 2000);
         }
 
         // Right-clicking an easel tab gets its own short menu, like a note tab:
@@ -771,6 +772,7 @@
             if (this._onZlKey) window.removeEventListener("keydown", this._onZlKey, true);
             if (this._onZlPopup) document.removeEventListener("popupshowing", this._onZlPopup, false);
             if (this._onEaselTabMenu) document.removeEventListener("popupshowing", this._onEaselTabMenu, false);
+            clearInterval(this._containerPoll);
             if (this._onContainerCheck) { gBrowser.tabContainer.removeEventListener("TabSelect", this._onContainerCheck); window.removeEventListener("ZenWorkspaceChanged", this._onContainerCheck); this._onContainerCheck = null; }
             if (this._onEaselRenameInput) document.removeEventListener("input", this._onEaselRenameInput, true);
             if (this._onEaselRenameKey) window.removeEventListener("keydown", this._onEaselRenameKey, true);
@@ -1590,7 +1592,11 @@
         // The container of the space this window is showing (0 = no container).
         _containerId() {
             try {
-                const id = globalThis.gZenWorkspaces?.getActiveWorkspace?.()?.containerTabId;
+                const zen = globalThis.gZenWorkspaces;
+                let workspace = zen?.getActiveWorkspaceFromCache?.() ?? zen?.getActiveWorkspace?.();
+                if (workspace && typeof workspace.then === "function") workspace = null; // async in some Zen versions
+                let id = workspace?.containerTabId;
+                if (id == null) id = gBrowser.selectedTab?.userContextId;
                 return Number.isFinite(Number(id)) ? Number(id) : 0;
             } catch (e) { return 0; }
         }
