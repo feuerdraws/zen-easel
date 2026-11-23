@@ -421,7 +421,9 @@
             // Main folder first, then each subfolder alphabetically with its own heading, line and numbering.
             const folderBlocks = [...folders].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base", numeric: true }))
                 .map(([name, list]) => html`
-                    <div class="zl-folder-head"><span>${name}</span></div>
+                    <div class="zl-folder-head"><span>${name}</span>
+                        <button class="zl-folder-new" type="button" title=${`New note in ${name}`}
+                            @click=${event => { event.stopPropagation(); notes.create(name).then(() => this._closeLibrary(document.querySelector("zen-library-easels-section"))).catch(e => console.error("[zen-easel] could not create note:", e)); }}>New</button></div>
                     <div class="easel-card-grid">
                         ${repeat(list.sort((a, b) => b.updatedAt - a.updatedAt), entry => entry.key, (entry, i) => entry.tpl(list.length - i))}
                     </div>`);

@@ -383,11 +383,10 @@
         // than this page's store so the document exists on disk before the tab is asked for,
         // which is what lets the tab open straight onto it with nothing to await.
         async createNew() {
-            const title = this._prompt("New easel", "Name this easel:", "Untitled Easel");
-            if (title === null) return;
+            // Like the library's + card: a new tab with a blank easel whose heading is already selected.
             this.closeList();
             try {
-                await this.host.bridge?.createEasel(title.trim() || "Untitled Easel");
+                await this.host.bridge?.createEasel("Untitled Easel");
             } catch (e) {
                 console.error("[zen-easel] could not create easel:", e);
             }
@@ -396,6 +395,13 @@
         async renameCurrent() {
             const doc = this.host.store.current;
             if (!doc) return;
+            // No pop-up: the heading on the board is selected so typing renames it (the name follows everywhere).
+            const canvas = this.host.canvas, headingId = canvas?.doc?.titleObjectId;
+            if (headingId && canvas._byId?.(headingId)) {
+                this.closeList();
+                window.setTimeout(() => canvas.startEditing(headingId, { selectAll: true }), 0);
+                return;
+            }
             const title = this._prompt("Rename easel", "New name:", doc.title);
             if (title === null || !title.trim()) return;
             await this.host.store.rename(doc.id, title.trim());
@@ -413,7 +419,7 @@
             let confirmed;
             try {
                 confirmed = Services.prompt.confirm(
-                    window,
+                    window.browsingContext?.topChromeWindow || window, // the same dialog Notes uses
                     "Delete easel",
                     `Delete "${doc.title}" and everything on it? This cannot be undone.`
                 );
