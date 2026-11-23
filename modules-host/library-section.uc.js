@@ -419,14 +419,16 @@
                     }
                 } catch (e) { console.error("[zen-easel] could not list notes:", e); }
             }
+            // Folders that hold nothing yet (a new one being named, or an empty one on disk) are listed too.
+            if (notes && !query) for (const name of notes.folders?.() || []) if (!folders.has(name)) folders.set(name, []);
             entries.sort((a, b) => b.updatedAt - a.updatedAt);
             // Main folder first, then each subfolder alphabetically with its own heading, line and numbering.
             const folderBlocks = [...folders].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base", numeric: true }))
                 .map(([name, list]) => html`
                     <div class="zl-folder-block">
-                        <div class="zl-folder-head"><span>${name}</span>
-                            <button class="zl-folder-new" type="button" title=${`New in ${name}`}
-                                @click=${event => { event.stopPropagation(); this.create(event.currentTarget, name); }}>New</button></div>
+                        ${notes?.folderHead
+                            ? notes.folderHead(name, anchor => this.create(anchor, name))
+                            : html`<div class="zl-folder-head"><span>${name}</span></div>`}
                         <div class="easel-card-grid">
                             ${repeat(list.sort((a, b) => b.updatedAt - a.updatedAt), entry => entry.key, (entry, i) => entry.tpl(list.length - i))}
                         </div>
@@ -563,6 +565,13 @@
             this._closeLibrary(section);
         },
 
+        // A folder was renamed in the Library: easels filed under it follow.
+        async renameFolder(oldName, newName) {
+            const { EaselStore } = ChromeUtils.importESModule(STORE);
+            await EaselStore.renameFolder(oldName, newName);
+            this._reloadOpen?.();
+        },
+
         // With Notes installed the + card asks which one to make; alone it makes an easel.
         // `folder`: a library subfolder to create the new easel or note in.
         create(anchor, folder = "") {
@@ -600,7 +609,13 @@
                 popup.appendChild(item);
             };
             add("Open Easel", () => this.open(board, null));
-            add("Rename Easel…", () => this.rename(board));
+            add("Change label…", () => this.rename(board));
+            add("Change Icon…", async () => {
+                const host = window.gZenEaselHost;
+                let tab = host?._tabForEasel?.(board.id);
+                if (!tab) { await host?.openEasel(board.id); tab = host?._tabForEasel?.(board.id); }
+                if (tab) { this._closeLibrary(document.querySelector("zen-library-easels-section")); setTimeout(() => host._changeBoardIcon(tab, board.id), 250); }
+            });
             add("Duplicate Easel", () => this.duplicate(board));
             if (board.icon) add("Reset Icon", () => window.gZenEaselHost?.setBoardIcon(board.id, null));
             popup.appendChild(document.createXULElement("menuseparator"));

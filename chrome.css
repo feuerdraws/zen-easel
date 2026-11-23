@@ -598,3 +598,10 @@ zen-library-easels-section .easel-card-icon.is-plain { background-color: transpa
 .zl-folder-block:hover .zl-folder-new, .zl-folder-head .zl-folder-new:focus-visible { max-width: 60px; opacity: 1; margin-inline-start: 0; }
 .zl-folder-head .zl-folder-new:hover { color: #000; }
 html[data-zl-scheme="dark"] .zl-folder-head .zl-folder-new:hover { color: #fff; }
+
+/* "+" before New, like Zen's clear button in the sidebar. */
+.zl-folder-head .zl-folder-new::before { content: "+"; margin-inline-end: 4px; font-weight: 700; }
+/* The folder name while it is being renamed. */
+.zl-folder-head .zl-folder-input { flex: none; width: 60%; min-width: 80px; box-sizing: border-box; padding: 2px 6px; border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 6px; background: color-mix(in srgb, currentColor 8%, transparent); color: inherit; font: inherit; outline: none; }
+.zn-library-newfolder-btn svg { stroke-width: 3; fill: none; opacity: .8; }

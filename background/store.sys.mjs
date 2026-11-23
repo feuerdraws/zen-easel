@@ -477,6 +477,14 @@ class EaselStoreImpl {
         return entry;
     }
 
+    // A library subfolder was renamed: every easel filed under it (in any container) follows.
+    async renameFolder(oldName, newName) {
+        await this.init();
+        let changed = false;
+        for (const ctx of this._ctxs.values()) for (const e of ctx.index?.easels || []) if (e.folder === oldName) { e.folder = newName; changed = true; }
+        if (changed) await this._writeIndex();
+    }
+
     async setIcon(id, icon) {
         await this.init();
         if (!isSafeId(id)) return;

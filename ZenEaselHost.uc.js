@@ -124,24 +124,55 @@
           for (const node of original) popup.append(node); // Zen's own order
         };
       },
-      // Zen's "Change Icon…" picker has no callback here, so the tab is watched until its icon changes.
-      watchIcon(tab, onChange) {
+      // Zen's "Change Icon…" picker has no callback here, so the tab is watched while the picker is in use. Picking an
+      // icon, an emoji, or the bin (back to the default) are all reported: onChange(value) with value null = default.
+      // `defaults` are values that mean "the default icon" (what the mod itself puts on the tab).
+      watchIcon(tab, onChange, defaults = []) {
         const emojiText = () => { const node = tab.querySelector?.('[class*="emoji" i]'); return node ? (node.textContent || "").trim() : ""; };
         const sources = () => ({
           static: tab.zenStaticIcon ?? null, attr: tab.getAttribute("zen-icon"), flag: tab.hasAttribute("zen-has-static-icon"),
           emoji: emojiText(), image: tab.getAttribute("image"),
         });
-        const before = JSON.stringify(sources());
-        let ticks = 0;
+        let last = JSON.stringify(sources()), ticks = 0;
         const timer = setInterval(() => {
-          const now = sources();
-          if (JSON.stringify(now) !== before) {
-            clearInterval(timer);
-            const value = now.static || now.attr || now.emoji || now.image || null;
-            console.log("[Zen Notes/Easel] tab icon changed:", now);
-            onChange(value);
-          } else if (++ticks > 300) clearInterval(timer);
+          if (!tab.isConnected || ++ticks > 450) { clearInterval(timer); return; }
+          const now = sources(), signature = JSON.stringify(now);
+          if (signature === last) return;
+          last = signature;
+          let value = now.static || now.attr || now.emoji || now.image || null;
+          if (value && defaults.includes(value)) value = null;
+          console.log("[Zen Notes/Easel] tab icon changed:", now, "->", value);
+          Promise.resolve(onChange(value)).catch(error => console.error("[Zen Notes/Easel] icon:", error))
+            .finally(() => setTimeout(() => { last = JSON.stringify(sources()); }, 700)); // our own changes to the tab are not news
         }, 400);
+      },
+      // Puts a saved icon back on a tab the way Zen's picker leaves it, so "Change Icon…" knows the tab has a custom one
+      // (and offers the bin). null removes it. The emoji also gets a drawn image, so it shows whatever Zen does with it.
+      applyIcon(tab, icon) {
+        if (!tab) return;
+        if (!icon) {
+          try { tab.zenStaticIcon = null; } catch {}
+          for (const name of ["zen-has-static-icon", "zen-icon"]) tab.removeAttribute(name);
+          return;
+        }
+        const value = icon.emoji || icon.src; if (!value) return;
+        try { tab.zenStaticIcon = value; } catch {}
+        tab.setAttribute("zen-has-static-icon", "true");
+        const src = icon.emoji
+          ? "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text x="16" y="25" font-size="24" text-anchor="middle">${String(icon.emoji).replace(/[<>&]/g, "")}</text></svg>`)
+          : icon.src;
+        if (tab.getAttribute("image") !== src) { try { gBrowser.setIcon(tab, src); } catch {} if (tab.getAttribute("image") !== src) tab.setAttribute("image", src); }
+      },
+      // Opens Zen's own icon picker for a tab that is not the one the context menu was opened on (library menus).
+      changeIcon(tab, onChange, defaults = []) {
+        const menu = document.getElementById("tabContextMenu");
+        const item = menu && [...menu.querySelectorAll("menuitem")].find(node => /^change icon/i.test(labelOf(node)) || /change.?icon|tab.?icon/i.test(node.id || ""));
+        if (!item) return false;
+        try { gBrowser.selectedTab = tab; } catch {}
+        for (const key of ["_contextTab", "contextTab"]) { try { TabContextMenu[key] = tab; } catch {} }
+        item.doCommand();
+        this.watchIcon(tab, onChange, defaults);
+        return true;
       },
       // "😀" -> { emoji }, "chrome://…/book.svg" -> { src }; other images are kept as they are ({ src, plain }).
       parseIcon(value) {
@@ -699,7 +730,7 @@
                     }),
                     found.icon ? item("Change Icon…", () => {
                         found.icon.doCommand();
-                        ZLTabMenu.watchIcon(tab, value => this.setBoardIcon(easelId, value));
+                        ZLTabMenu.watchIcon(tab, value => this.setBoardIcon(easelId, value), [BOARD_ICON]);
                     }) : null,
                     "sep", "pin",
                     item("Unload Easel", () => nativeUnload ? nativeUnload.doCommand() : gBrowser.explicitUnloadTabs?.([tab])),
@@ -1568,10 +1599,7 @@
                 const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
                 const icon = (await EaselStore.listAllEasels()).find(b => b.id === id)?.icon;
                 if (!icon) return;
-                const src = icon.emoji
-                    ? "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text x="16" y="25" font-size="24" text-anchor="middle">${icon.emoji.replace(/[<>&]/g, "")}</text></svg>`)
-                    : icon.src;
-                if (src && tab.getAttribute("image") !== src) gBrowser.setIcon(tab, src);
+                ZLTabMenu.applyIcon(tab, icon);
             };
             for (const ms of [150, 700, 1800, 4000]) setTimeout(() => run().catch(e => console.error("[zen-easel] tab icon:", e)), ms);
         }
@@ -1651,10 +1679,23 @@
         }
 
         // "Change Icon…" on an easel tab: the pick is kept on the board and shown on its library tile.
+        _tabForEasel(id) { return [...gBrowser.tabs].find(tab => this._easelIdForTab(tab) === id) || null; }
+
+        // Zen's own icon picker for an easel's tab (used by the library's context menu).
+        _changeBoardIcon(tab, id) {
+            if (!ZLTabMenu.changeIcon(tab, value => this.setBoardIcon(id, value), [BOARD_ICON])) console.warn("[zen-easel] could not open Zen's icon picker");
+        }
+
         async setBoardIcon(id, value) {
             const icon = ZLTabMenu.parseIcon(value);
             const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
             await EaselStore.setIcon(id, icon);
+            // Tabs showing this easel: the new icon, or the default one after the bin.
+            for (const tab of gBrowser.tabs) {
+                if (this._easelIdForTab(tab) !== id) continue;
+                ZLTabMenu.applyIcon(tab, icon);
+                if (!icon) { try { gBrowser.setIcon(tab, BOARD_ICON); } catch (e) { } }
+            }
             window.ZenEaselLibrarySection?._reloadOpen();
         }
 
