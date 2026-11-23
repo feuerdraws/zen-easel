@@ -601,24 +601,73 @@
         menu(board, event) {
             event.preventDefault();
             event.stopPropagation();
+            const host = window.gZenEaselHost;
+            const ZLTabMenu = window.ZLTabMenu || { splitWith: () => false, essentials: () => false };
+            const notes = hub.providers.get("notes");
+            const closeLibrary = () => this._closeLibrary(document.querySelector("zen-library-easels-section"));
             const popup = document.createXULElement("menupopup");
-            const add = (label, command) => {
+            const tabOf = () => { const tab = host?._tabForEasel?.(board.id); return tab && tab.isConnected && !tab.closing ? tab : null; };
+            const ensureTab = () => tabOf() || host?.openEasel(board.id, { inBackground: true });
+            const isOpen = !!tabOf();
+            const add = (label, command, parent = popup) => {
                 const item = document.createXULElement("menuitem");
                 item.setAttribute("label", label);
-                item.addEventListener("command", command, { once: true });
-                popup.appendChild(item);
+                item.addEventListener("command", () => Promise.resolve().then(command).catch(e => console.error("[zen-easel] library menu:", e)), { once: true });
+                parent.appendChild(item);
+                return item;
             };
+            const sep = (parent = popup) => parent.appendChild(document.createXULElement("menuseparator"));
+            const submenu = label => {
+                const menu = document.createXULElement("menu");
+                menu.setAttribute("label", label);
+                const sub = document.createXULElement("menupopup");
+                menu.appendChild(sub);
+                popup.appendChild(menu);
+                return { menu, sub };
+            };
+
+            // Move to Folder: the Library's subfolders, then a line and New Folder (like the footer's +).
+            const folders = new Set(notes?.folders?.() || []);
+            for (const other of document.querySelector("zen-library-easels-section")?._boards || []) if (other.folder) folders.add(other.folder);
+            const move = submenu("Move to Folder");
+            if (board.folder) add("Main folder", () => host.setBoardFolder(board.id, ""), move.sub);
+            for (const name of [...folders].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }))) {
+                if (name !== board.folder) add(name, () => host.setBoardFolder(board.id, name), move.sub);
+            }
+            if (move.sub.children.length) sep(move.sub);
+            if (notes?.newFolder) add("New Folder", async () => { const name = await notes.newFolder(); if (name) await host.setBoardFolder(board.id, name); }, move.sub);
+            else move.menu.disabled = !move.sub.children.length;
+            add("Add Split View", async () => { const tab = await ensureTab(); if (!ZLTabMenu.splitWith(tab)) console.warn("[zen-easel] select another tab first to add a split view"); });
+            sep();
+            if (isOpen) add("Reload Easel", () => { const tab = tabOf(); if (tab) gBrowser.reloadTab(tab); });
+            add("Add to Essentials", async () => { ZLTabMenu.essentials(await ensureTab()); });
+            sep();
             add("Open Easel", () => this.open(board, null));
+            sep();
             add("Change label…", () => this.rename(board));
             add("Change Icon…", async () => {
-                const host = window.gZenEaselHost;
-                let tab = host?._tabForEasel?.(board.id);
-                if (!tab) { await host?.openEasel(board.id); tab = host?._tabForEasel?.(board.id); }
-                if (tab) { this._closeLibrary(document.querySelector("zen-library-easels-section")); setTimeout(() => host._changeBoardIcon(tab, board.id), 250); }
+                const tab = await ensureTab();
+                if (tab) { closeLibrary(); setTimeout(() => host._changeBoardIcon(tab, board.id), 250); }
             });
+            sep();
+            if (isOpen) add("Unload Easel", () => { const tab = tabOf(); if (tab) gBrowser.explicitUnloadTabs?.([tab]); });
             add("Duplicate Easel", () => this.duplicate(board));
-            if (board.icon) add("Reset Icon", () => window.gZenEaselHost?.setBoardIcon(board.id, null));
-            popup.appendChild(document.createXULElement("menuseparator"));
+            sep();
+            // Transfer to Container: the same containers "Open in New Container Tab" lists.
+            const transfer = submenu("Transfer to Container");
+            try {
+                const { EaselStore } = ChromeUtils.importESModule(STORE);
+                const own = EaselStore._ctxOf(board.id);
+                for (const cid of EaselStore.allContainerIds()) {
+                    if (EaselStore._ctxFor(cid) === own) continue;
+                    let label = "No Container";
+                    if (cid) { try { label = ContextualIdentityService.getUserContextLabel(cid) || `Container ${cid}`; } catch (e) { label = `Container ${cid}`; } }
+                    add(label, () => host.transferBoard(board.id, cid), transfer.sub);
+                }
+            } catch (e) { console.error("[zen-easel] containers:", e); }
+            transfer.menu.disabled = !transfer.sub.children.length;
+            sep();
+            if (isOpen) { add("Close Easel", () => { const tab = tabOf(); if (tab) gBrowser.removeTab(tab); }); sep(); }
             add("Delete Easel", () => this.remove(board));
             popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
             document.getElementById("mainPopupSet")?.appendChild(popup);

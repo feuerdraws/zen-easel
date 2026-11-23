@@ -163,6 +163,22 @@
           : icon.src;
         if (tab.getAttribute("image") !== src) { try { gBrowser.setIcon(tab, src); } catch {} if (tab.getAttribute("image") !== src) tab.setAttribute("image", src); }
       },
+      // Library menus: Zen's own "Add to Essentials" and split view for a tab that is not the selected one.
+      essentials(tab) {
+        try { if (globalThis.gZenPinnedTabManager?.addToEssentials) { gZenPinnedTabManager.addToEssentials(tab); return true; } } catch (error) { console.error(error); }
+        const menu = document.getElementById("tabContextMenu");
+        const item = menu && [...menu.querySelectorAll("menuitem")].find(node => /essentials/i.test(labelOf(node)) || /essentials/i.test(node.id || ""));
+        if (!item) return false;
+        for (const key of ["_contextTab", "contextTab"]) { try { TabContextMenu[key] = tab; } catch {} }
+        item.doCommand(); return true;
+      },
+      splitWith(tab) {
+        try {
+          const selected = gBrowser.selectedTab;
+          if (!globalThis.gZenViewSplitter?.splitTabs || !selected || selected === tab) return false;
+          gZenViewSplitter.splitTabs([selected, tab]); return true;
+        } catch (error) { console.error(error); return false; }
+      },
       // Opens Zen's own icon picker for a tab that is not the one the context menu was opened on (library menus).
       changeIcon(tab, onChange, defaults = []) {
         const menu = document.getElementById("tabContextMenu");
@@ -189,6 +205,7 @@
       },
     };
   })();
+  window.ZLTabMenu = ZLTabMenu;
 
     const ZLMenus = (() => {
         const PLUS_ID = "zenCreateNewPopup", SIDE_IDS = ["toolbar-context-menu", "zen-sidebar-context-menu"];
@@ -1679,6 +1696,26 @@
         }
 
         // "Change Icon…" on an easel tab: the pick is kept on the board and shown on its library tile.
+        async setBoardFolder(id, folder) {
+            const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            await EaselStore.setFolder(id, folder);
+            window.ZenEaselLibrarySection?._reloadOpen?.();
+        }
+
+        // Library "Transfer to Container": the easel's files move to that container's folder, and its tab closes.
+        async transferBoard(id, containerId) {
+            const { EaselStore } = ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
+            for (const win of Services.wm.getEnumerator("navigator:browser")) {
+                const host = win.gZenEaselHost;
+                const tab = host?._tabForEasel?.(id);
+                if (tab) win.gBrowser.removeTab(tab);
+            }
+            await new Promise(resolve => setTimeout(resolve, 150)); // lets the page save before its files move
+            const moved = await EaselStore.transferEasel(id, containerId);
+            window.ZenEaselLibrarySection?._reloadOpen?.();
+            return moved;
+        }
+
         _tabForEasel(id) { return [...gBrowser.tabs].find(tab => this._easelIdForTab(tab) === id) || null; }
 
         // Zen's own icon picker for an easel's tab (used by the library's context menu).

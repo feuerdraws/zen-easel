@@ -485,6 +485,41 @@ class EaselStoreImpl {
         if (changed) await this._writeIndex();
     }
 
+    // Files an easel under a Library subfolder ("" = the main list).
+    async setFolder(id, folder) {
+        await this.init();
+        const entry = this._entryOf(id);
+        if (!entry) return;
+        if (typeof folder === "string" && folder.trim()) entry.folder = folder.trim().slice(0, 200); else delete entry.folder;
+        await this._writeIndex();
+    }
+
+    // Moves an easel (document, thumbnail and assets) into another container's folder.
+    async transferEasel(id, containerId) {
+        await this.init();
+        if (!isSafeId(id)) return false;
+        const from = this._ctxOf(id), to = this._ctxFor(containerId);
+        if (from === to) return false;
+        const entry = from.index?.easels.find(e => e.id === id);
+        if (!entry) return false;
+        await this.flush();
+        await IOUtils.makeDirectory(PathUtils.join(to.root, "easels"), { createAncestors: true, ignoreExisting: true });
+        await IOUtils.makeDirectory(PathUtils.join(to.root, "assets"), { createAncestors: true, ignoreExisting: true });
+        if (!to.index) to.index = await this._readIndexFile(to);
+        const pairs = [
+            [PathUtils.join(from.root, "easels", `${id}.json`), PathUtils.join(to.root, "easels", `${id}.json`)],
+            [PathUtils.join(from.root, "easels", `${id}.thumb.png`), PathUtils.join(to.root, "easels", `${id}.thumb.png`)],
+            [PathUtils.join(from.root, "assets", id), PathUtils.join(to.root, "assets", id)],
+        ];
+        for (const [source, target] of pairs) if (await IOUtils.exists(source)) await IOUtils.move(source, target);
+        from.index.easels = from.index.easels.filter(e => e.id !== id);
+        if (from.index.lastOpened === id) from.index.lastOpened = null;
+        delete entry.folder;
+        to.index.easels.push(entry);
+        await this._writeIndex();
+        return true;
+    }
+
     async setIcon(id, icon) {
         await this.init();
         if (!isSafeId(id)) return;
