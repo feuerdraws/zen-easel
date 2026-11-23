@@ -1608,14 +1608,14 @@
             } catch (e) { console.error("[zen-easel] container:", e); }
         }
 
-        async createEasel(title = "Untitled Easel") {
+        async createEasel(title = "Untitled Easel", folder = "") {
             const { EaselStore } =
                 ChromeUtils.importESModule(BASE + "background/store.sys.mjs");
             this._useContainer();
 
             // The document exists on disk before the tab is asked for, so the tab opens
             // straight onto it — there is no switch to start and nothing to await.
-            const { entry } = await EaselStore.createDocument(title);
+            const { entry } = await EaselStore.createDocument(title, folder);
             return this.openEasel(entry.id);
         }
 

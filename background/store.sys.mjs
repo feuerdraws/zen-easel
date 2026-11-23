@@ -308,7 +308,8 @@ class EaselStoreImpl {
                 lastOpenedAt: e.lastOpenedAt || 0,
                 objectCount: typeof e.objectCount === "number" ? e.objectCount : 0,
                 background: typeof e.background === "string" ? e.background : "theme",
-                icon: e.icon && typeof e.icon === "object" ? e.icon : null
+                icon: e.icon && typeof e.icon === "object" ? e.icon : null,
+                folder: typeof e.folder === "string" ? e.folder : ""
             }))
             .sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -403,11 +404,13 @@ class EaselStoreImpl {
 
     // Creates an empty easel and returns its index entry. The page builds the document
     // body itself; all this has to guarantee is that the id exists and the file is there.
-    async createDocument(title = "Untitled Easel") {
+    async createDocument(title = "Untitled Easel", folder = "") {
         await this.init();
         const now = Date.now();
         const id = uuid();
         const entry = { id, title, createdAt: now, updatedAt: now, lastOpenedAt: now, objectCount: 0, background: "theme" };
+        // The library's subfolder this easel is filed under (the same names Notes' subfolders have).
+        if (typeof folder === "string" && folder.trim()) entry.folder = folder.trim().slice(0, 200);
 
         const body = {
             version: INDEX_VERSION,
@@ -468,6 +471,7 @@ class EaselStoreImpl {
         } catch (e) { }
         const source = this._entryOf(id);
         const entry = { id: newId, title, createdAt: now, updatedAt: now, lastOpenedAt: 0, objectCount: source?.objectCount ?? 0, background: typeof doc.background === "string" ? doc.background : "theme" };
+        if (source?.folder) entry.folder = source.folder;
         this._index.easels.push(entry);
         await this._writeIndex();
         return entry;

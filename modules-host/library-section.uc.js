@@ -406,7 +406,9 @@
             window.__zlSchemeWatch?.apply();
             const entries = [], folders = new Map(); // folders: subfolder name -> note entries
             for (const board of shown || []) {
-                entries.push({ key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: n => this._card(html, board, n) });
+                const entry = { key: `easel:${board.id}`, updatedAt: board.updatedAt || 0, tpl: n => this._card(html, board, n) };
+                if (board.folder) { if (!folders.has(board.folder)) folders.set(board.folder, []); folders.get(board.folder).push(entry); }
+                else entries.push(entry);
             }
             if (notes) {
                 try {
@@ -421,11 +423,13 @@
             // Main folder first, then each subfolder alphabetically with its own heading, line and numbering.
             const folderBlocks = [...folders].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base", numeric: true }))
                 .map(([name, list]) => html`
-                    <div class="zl-folder-head"><span>${name}</span>
-                        <button class="zl-folder-new" type="button" title=${`New note in ${name}`}
-                            @click=${event => { event.stopPropagation(); notes.create(name).then(() => this._closeLibrary(document.querySelector("zen-library-easels-section"))).catch(e => console.error("[zen-easel] could not create note:", e)); }}>New</button></div>
-                    <div class="easel-card-grid">
-                        ${repeat(list.sort((a, b) => b.updatedAt - a.updatedAt), entry => entry.key, (entry, i) => entry.tpl(list.length - i))}
+                    <div class="zl-folder-block">
+                        <div class="zl-folder-head"><span>${name}</span>
+                            <button class="zl-folder-new" type="button" title=${`New in ${name}`}
+                                @click=${event => { event.stopPropagation(); this.create(event.currentTarget, name); }}>New</button></div>
+                        <div class="easel-card-grid">
+                            ${repeat(list.sort((a, b) => b.updatedAt - a.updatedAt), entry => entry.key, (entry, i) => entry.tpl(list.length - i))}
+                        </div>
                     </div>`);
 
             const noun = notes ? "easels or notes" : "easels";
@@ -560,9 +564,10 @@
         },
 
         // With Notes installed the + card asks which one to make; alone it makes an easel.
-        create(anchor) {
+        // `folder`: a library subfolder to create the new easel or note in.
+        create(anchor, folder = "") {
             const notes = hub.providers.get("notes");
-            if (!notes || !anchor) { this._createEasel(); return; }
+            if (!notes || !anchor) { this._createEasel(folder); return; }
             const popup = document.createXULElement("menupopup");
             const add = (label, command) => {
                 const item = document.createXULElement("menuitem");
@@ -570,16 +575,16 @@
                 item.addEventListener("command", command, { once: true });
                 popup.appendChild(item);
             };
-            add("New Easel", () => this._createEasel());
-            add("New Note", () => notes.create().catch(e => console.error("[zen-easel] could not create note:", e)));
+            add("New Easel", () => this._createEasel(folder));
+            add("New Note", () => notes.create(folder).catch(e => console.error("[zen-easel] could not create note:", e)));
             popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
             document.getElementById("mainPopupSet")?.appendChild(popup);
             popup.openPopup(anchor, "after_start");
         },
 
         // No name prompt: the new board opens with its heading already selected, so typing names it.
-        _createEasel() {
-            window.gZenEaselHost?.createEasel("Untitled Easel")
+        _createEasel(folder = "") {
+            window.gZenEaselHost?.createEasel("Untitled Easel", folder)
                 .then(() => this._closeLibrary(document.querySelector("zen-library-easels-section")))
                 .catch(e => console.error("[zen-easel] could not create easel:", e));
         },
